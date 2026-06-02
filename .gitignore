@@ -1,0 +1,5 @@
+.DS_Store
+*.log
+
+# Variante B: vendor wird vom Release-Workflow gebaut, nicht committed.
+/vendor/

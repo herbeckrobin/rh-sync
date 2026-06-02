@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & release ZIP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Configure Composer GitHub auth
+        run: composer config --global github-oauth.github.com "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Validate composer.json
+        run: composer validate --no-check-publish
+
+      - name: Install production dependencies
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+
+      - name: Verify plugin version matches tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          FILE_VERSION=$(grep -E '^\s\*\s+Version:' rh-sync.php | sed -E 's/.*Version:\s+//' | tr -d '[:space:]')
+          echo "Tag: $TAG_VERSION"
+          echo "File: $FILE_VERSION"
+          if [ "$TAG_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::Tag $TAG_VERSION does not match plugin header version $FILE_VERSION"
+            exit 1
+          fi
+
+      - name: Build ZIP
+        run: |
+          mkdir -p /tmp/build
+          rsync -a --exclude-from=- ./ /tmp/build/rh-sync/ <<'EXCLUDES'
+          .git/
+          .github/
+          .gitignore
+          .idea/
+          .vscode/
+          node_modules/
+          tests/
+          README.md
+          *.log
+          EXCLUDES
+          cd /tmp/build
+          zip -r "${{ github.workspace }}/rh-sync.zip" rh-sync
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rh-sync.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
