@@ -81,7 +81,9 @@ final class LocalOptionGuard
 
         $where = $this->buildWhereClause();
         /** @var array<int, array<string, string>>|null $rows */
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- direkte Query auf interne Options-Tabelle, Caching bei einmaliger Sync-Operation nicht sinnvoll.
         $rows = $wpdb->get_results(
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- WHERE aus festen Konstanten gebaut (kein User-Input), $wpdb->options ist interner Tabellenname.
             "SELECT option_name, option_value, autoload FROM {$wpdb->options} WHERE {$where}",
             ARRAY_A
         );
@@ -109,9 +111,11 @@ final class LocalOptionGuard
         global $wpdb;
 
         $where = $this->buildWhereClause();
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- direkte Query auf interne Options-Tabelle, WHERE aus festen Konstanten (kein User-Input), Caching bei einmaliger Sync-Operation nicht sinnvoll.
         $wpdb->query("DELETE FROM {$wpdb->options} WHERE {$where}");
 
         foreach ($snapshot as $row) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- $wpdb->insert auf interne Options-Tabelle mit Format-Platzhaltern, Caching bei einmaliger Sync-Operation nicht sinnvoll.
             $wpdb->insert(
                 $wpdb->options,
                 [

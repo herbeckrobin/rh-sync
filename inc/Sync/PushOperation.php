@@ -48,6 +48,7 @@ final class PushOperation
             $phaseTimings['export'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::progress($jobId, 0, $totalSize);
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_EXPORT, sprintf(
+                /* translators: %s = Datenmenge */
                 __('Snapshot bereit (%s)', 'rh-sync'),
                 size_format($totalSize)
             ));
@@ -61,7 +62,8 @@ final class PushOperation
             $phaseTimings['upload'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::progress($jobId, $totalSize, $totalSize);
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_UPLOAD, sprintf(
-                __('%s in %d Chunks hochgeladen', 'rh-sync'),
+                /* translators: %1$s = Datenmenge, %2$d = Anzahl Chunks */
+                __('%1$s in %2$d Chunks hochgeladen', 'rh-sync'),
                 size_format($totalSize),
                 $chunks
             ));
@@ -74,6 +76,7 @@ final class PushOperation
             $phaseTimings['import'] = (int) ((microtime(true) - $phaseStart) * 1000);
             $remoteImportMs = isset($completion['duration_ms']) ? (int) $completion['duration_ms'] : null;
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_IMPORT, $remoteImportMs !== null
+                /* translators: %d = Dauer in Millisekunden */
                 ? sprintf(__('Remote-Import abgeschlossen (%d ms)', 'rh-sync'), $remoteImportMs)
                 : __('Remote-Import abgeschlossen', 'rh-sync'));
 
@@ -137,6 +140,7 @@ final class PushOperation
             );
         } finally {
             if ($localZip !== null && is_file($localZip)) {
+                // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer temporären Export-Datei, ein Fehlschlag ist unkritisch.
                 @unlink($localZip);
             }
         }
@@ -147,20 +151,24 @@ final class PushOperation
         $response = $this->client->request($peer, 'POST', '/rhbp/v1/sync/import/init', []);
 
         if (!$response->isSuccess()) {
+            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPushResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException(sprintf(
                 'Import-Init fehlgeschlagen (HTTP %d): %s',
                 $response->status,
                 $response->error ?? $this->extractErrorMessage($response)
             ));
+            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
         $data = $response->json();
         if (!is_array($data) || !isset($data['session_id']) || !is_string($data['session_id'])) {
+            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPushResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException(sprintf(
                 'Init-Response unvollstaendig (kein session_id). HTTP %d, Body-Preview: %s',
                 $response->status,
                 $this->previewBody($response->body)
             ));
+            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
         return $data['session_id'];
@@ -224,11 +232,13 @@ final class PushOperation
         ]);
 
         if (!$response->isSuccess()) {
+            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPushResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException(sprintf(
                 'Import-Complete fehlgeschlagen (HTTP %d): %s',
                 $response->status,
                 $response->error ?? $this->extractErrorMessage($response)
             ));
+            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
         return $response->json() ?? [];

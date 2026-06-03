@@ -1,0 +1,14 @@
+# Wird beim WordPress.org-Build (bin/build-wporg.sh) ausgeschlossen.
+.git
+.github
+.gitignore
+.distignore
+.idea
+.vscode
+node_modules
+tests
+bin
+dist
+README.md
+*.log
+.DS_Store

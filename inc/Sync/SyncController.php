@@ -137,10 +137,13 @@ final class SyncController
         $uploads = wp_upload_dir();
         $uploadBase = (string) $uploads['basedir'];
 
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Manifest-Statistik, direkte Query auf interne posts-Tabelle, Caching für eine Live-Statusabfrage nicht sinnvoll.
         $postCount = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_status = 'publish'");
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Manifest-Statistik, direkte Query auf interne posts-Tabelle, Caching für eine Live-Statusabfrage nicht sinnvoll.
         $lastModified = (string) $wpdb->get_var("SELECT MAX(post_modified_gmt) FROM {$wpdb->posts}");
 
         $dbName = defined('DB_NAME') ? (string) constant('DB_NAME') : '';
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Manifest-Statistik, direkte Query auf information_schema mit esc_sql-Werten, Caching für eine Live-Statusabfrage nicht sinnvoll.
         $dbSize = (int) $wpdb->get_var(sprintf(
             "SELECT SUM(data_length + index_length) FROM information_schema.TABLES WHERE table_schema = '%s' AND table_name LIKE '%s'",
             esc_sql($dbName),
@@ -412,9 +415,11 @@ final class SyncController
         $files = glob($dir . '/*') ?: [];
         foreach ($files as $file) {
             if (is_file($file)) {
+                // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer temporären Session-Datei, ein Fehlschlag ist unkritisch.
                 @unlink($file);
             }
         }
+        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup eines temporären Session-Verzeichnisses, ein Fehlschlag ist unkritisch.
         @rmdir($dir);
     }
 

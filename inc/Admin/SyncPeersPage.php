@@ -67,7 +67,8 @@ final class SyncPeersPage
             return;
         }
 
-        $message = isset($_GET['rhbp_message']) ? sanitize_key((string) $_GET['rhbp_message']) : '';
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nur Anzeige einer Status-Meldung nach Redirect, keine zustandsändernde Aktion.
+        $message = isset($_GET['rhbp_message']) ? sanitize_key(wp_unslash($_GET['rhbp_message'])) : '';
         if ($message === '') {
             return;
         }
@@ -136,7 +137,9 @@ final class SyncPeersPage
         echo '</div>';
         if ($peers !== []) {
             echo '<div class="rhbp-sync__head-actions">';
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
             echo '<button type="button" class="rhbp-btn" data-rhbp-modal-open="rhbp-modal-join">' . $this->icon('inbox', 'sm') . ' ' . esc_html__('Code eingeben', 'rh-sync') . '</button>';
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
             echo '<button type="button" class="rhbp-btn rhbp-btn--primary" data-rhbp-modal-open="rhbp-modal-create">' . $this->icon('plus', 'sm') . ' ' . esc_html__('Verbindung erzeugen', 'rh-sync') . '</button>';
             echo '</div>';
         }
@@ -193,10 +196,10 @@ final class SyncPeersPage
         }
         check_admin_referer(self::NONCE_ADD);
 
-        $name = isset($_POST['peer_name']) ? sanitize_text_field((string) $_POST['peer_name']) : '';
-        $url = isset($_POST['peer_url']) ? esc_url_raw((string) $_POST['peer_url']) : '';
-        $tokenInput = isset($_POST['peer_token']) ? sanitize_text_field((string) $_POST['peer_token']) : '';
-        $pairingInput = isset($_POST['peer_pairing']) ? trim((string) wp_unslash((string) $_POST['peer_pairing'])) : '';
+        $name = isset($_POST['peer_name']) ? sanitize_text_field(wp_unslash($_POST['peer_name'])) : '';
+        $url = isset($_POST['peer_url']) ? esc_url_raw(wp_unslash($_POST['peer_url'])) : '';
+        $tokenInput = isset($_POST['peer_token']) ? sanitize_text_field(wp_unslash($_POST['peer_token'])) : '';
+        $pairingInput = isset($_POST['peer_pairing']) ? sanitize_text_field(wp_unslash($_POST['peer_pairing'])) : '';
 
         $pairing = null;
         if ($pairingInput !== '') {
@@ -258,7 +261,7 @@ final class SyncPeersPage
         }
         check_admin_referer(self::NONCE_REMOVE);
 
-        $id = isset($_POST['peer_id']) ? sanitize_text_field((string) $_POST['peer_id']) : '';
+        $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         if ($id !== '') {
             $this->registry->remove($id);
             $this->redirect('peer_removed');
@@ -274,7 +277,7 @@ final class SyncPeersPage
         }
         check_admin_referer(self::NONCE_REGEN);
 
-        $id = isset($_POST['peer_id']) ? sanitize_text_field((string) $_POST['peer_id']) : '';
+        $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
         if ($peer === null) {
             $this->redirect('peer_not_found');
@@ -298,7 +301,7 @@ final class SyncPeersPage
         }
         check_admin_referer(self::NONCE_PROFILE);
 
-        $id = isset($_POST['peer_id']) ? sanitize_text_field((string) $_POST['peer_id']) : '';
+        $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
         if ($peer === null) {
             $this->redirect('peer_not_found');
@@ -321,7 +324,7 @@ final class SyncPeersPage
         }
         check_admin_referer(self::NONCE_PERMISSIONS);
 
-        $id = isset($_POST['peer_id']) ? sanitize_text_field((string) $_POST['peer_id']) : '';
+        $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
         if ($peer === null) {
             $this->redirect('peer_not_found');
@@ -345,7 +348,7 @@ final class SyncPeersPage
         }
         check_admin_referer(self::NONCE_PULL);
 
-        $id = isset($_POST['peer_id']) ? sanitize_text_field((string) $_POST['peer_id']) : '';
+        $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
         if ($peer === null) {
             $this->redirect('peer_not_found');
@@ -376,7 +379,7 @@ final class SyncPeersPage
         }
         check_admin_referer(self::NONCE_PUSH);
 
-        $id = isset($_POST['peer_id']) ? sanitize_text_field((string) $_POST['peer_id']) : '';
+        $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
         if ($peer === null) {
             $this->redirect('peer_not_found');
@@ -420,7 +423,8 @@ final class SyncPeersPage
             if (!$response->isSuccess()) {
                 wp_send_json_error([
                     'message' => sprintf(
-                        __('Peer nicht erreichbar (HTTP %d): %s', 'rh-sync'),
+                        /* translators: %1$d = HTTP-Statuscode, %2$s = Fehlermeldung */
+                        __('Peer nicht erreichbar (HTTP %1$d): %2$s', 'rh-sync'),
                         $response->status,
                         $response->error ?? __('Unbekannter Fehler', 'rh-sync')
                     ),
@@ -495,7 +499,8 @@ final class SyncPeersPage
     {
         $this->checkAjax();
 
-        $jobId = isset($_GET['job_id']) ? sanitize_text_field((string) $_GET['job_id']) : '';
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce wird in dieser Methode via checkAjax() geprüft.
+        $jobId = isset($_GET['job_id']) ? sanitize_text_field(wp_unslash($_GET['job_id'])) : '';
         if ($jobId === '' || !preg_match('/^[a-f0-9]{32}$/', $jobId)) {
             wp_send_json_error(['message' => __('Ungültige Job-ID.', 'rh-sync')], 400);
         }
@@ -515,7 +520,8 @@ final class SyncPeersPage
     {
         $this->checkAjax();
 
-        $jobId = isset($_POST['job_id']) ? sanitize_text_field((string) $_POST['job_id']) : '';
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce wird in dieser Methode via checkAjax() geprüft.
+        $jobId = isset($_POST['job_id']) ? sanitize_text_field(wp_unslash($_POST['job_id'])) : '';
         if ($jobId !== '' && preg_match('/^[a-f0-9]{32}$/', $jobId)) {
             SyncStatus::clear($jobId);
         }
@@ -533,7 +539,7 @@ final class SyncPeersPage
             wp_send_json_error(['message' => __('Keine Berechtigung.', 'rh-sync')], 403);
         }
 
-        $nonce = isset($_REQUEST['nonce']) ? (string) $_REQUEST['nonce'] : '';
+        $nonce = isset($_REQUEST['nonce']) ? sanitize_text_field(wp_unslash($_REQUEST['nonce'])) : '';
         if (!wp_verify_nonce($nonce, self::NONCE_AJAX)) {
             wp_send_json_error(['message' => __('Sicherheitsprüfung fehlgeschlagen.', 'rh-sync')], 403);
         }
@@ -541,7 +547,8 @@ final class SyncPeersPage
 
     private function resolvePeerFromAjax(): Peer
     {
-        $id = isset($_REQUEST['peer_id']) ? sanitize_text_field((string) $_REQUEST['peer_id']) : '';
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce wird vom aufrufenden AJAX-Handler via checkAjax() geprüft.
+        $id = isset($_REQUEST['peer_id']) ? sanitize_text_field(wp_unslash($_REQUEST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
         if ($peer === null) {
             wp_send_json_error(['message' => __('Peer nicht gefunden.', 'rh-sync')], 404);
@@ -572,12 +579,15 @@ final class SyncPeersPage
             header('Connection: close');
         }
 
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON-Response, via wp_json_encode kodiert, wird mit Content-Type application/json gesendet.
         echo $response;
 
         // Output-Buffers leeren
         while (ob_get_level() > 0) {
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Flush, ein Fehlschlag ist unkritisch.
             @ob_end_flush();
         }
+        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Flush, ein Fehlschlag ist unkritisch.
         @flush();
 
         // PHP-FPM: Connection sauber schließen, PHP arbeitet weiter
@@ -588,6 +598,7 @@ final class SyncPeersPage
 
     private function profileFromPost(): SyncProfile
     {
+        // phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce wird vom aufrufenden Handler (handleUpdateProfile via check_admin_referer) geprüft, nur Existenz-/Boolean-Prüfung der Profil-Felder.
         return new SyncProfile(
             content: !empty($_POST['profile']['content']),
             taxonomies: !empty($_POST['profile']['taxonomies']),
@@ -598,6 +609,7 @@ final class SyncPeersPage
             customTables: !empty($_POST['profile']['customTables']),
             uploads: !empty($_POST['profile']['uploads']),
         );
+        // phpcs:enable WordPress.Security.NonceVerification.Missing
     }
 
     private function profileSummary(SyncProfile $profile): string
@@ -659,12 +671,14 @@ final class SyncPeersPage
 
         echo '<div class="rhbp-modal__head">';
         echo '<div class="rhbp-modal__head-l">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<span class="rhbp-modal__head-icon rhbp-modal__head-icon--ok">' . $this->icon('check') . '</span>';
         echo '<div>';
         echo '<h3 class="rhbp-modal__title">' . esc_html(sprintf(/* translators: %s: peer name */ __('Verbindung „%s" erstellt', 'rh-sync'), $peer->name)) . '</h3>';
         echo '<p class="rhbp-modal__sub">' . esc_html__('Ein Schritt fehlt noch auf der anderen Site.', 'rh-sync') . '</p>';
         echo '</div>';
         echo '</div>';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
         echo '</div>';
 
@@ -676,9 +690,11 @@ final class SyncPeersPage
 
         echo '<div class="rhbp-codebox">';
         echo '<code id="rhbp-pairing-code">' . esc_html($pairingCode) . '</code>';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<button type="button" class="rhbp-btn" data-rhbp-copy="#rhbp-pairing-code" title="' . esc_attr__('Kopieren', 'rh-sync') . '" aria-label="' . esc_attr__('Code kopieren', 'rh-sync') . '">' . $this->icon('copy', 'sm') . '</button>';
         echo '</div>';
 
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:14px;">' . $this->icon('lock', 'sm') . '<span>' . esc_html__('Der Code enthält ein geheimes Token. Gib ihn nur über einen sicheren Weg weiter (1Password, verschlüsselter Chat), nicht offen. Nach dem Schließen ist er nicht mehr abrufbar, dann nur noch neu erzeugen.', 'rh-sync') . '</span></div>';
 
         echo '</div>';
@@ -717,8 +733,10 @@ final class SyncPeersPage
         echo '<span class="dashicons dashicons-' . ($success ? 'yes-alt' : 'warning') . '" aria-hidden="true"></span>';
         echo '<strong>';
         if ($success) {
+            /* translators: %s = Peer-Name */
             printf(esc_html__('Pull von "%s" erfolgreich', 'rh-sync'), esc_html((string) $data['peer_name']));
         } else {
+            /* translators: %s = Peer-Name */
             printf(esc_html__('Pull von "%s" fehlgeschlagen', 'rh-sync'), esc_html((string) $data['peer_name']));
         }
         echo '</strong>';
@@ -727,9 +745,10 @@ final class SyncPeersPage
         if ($success) {
             echo '<p>';
             printf(
+                /* translators: %1$s = Datenmenge, %2$d = Dauer in Millisekunden */
                 esc_html__('%1$s in %2$d ms gezogen und importiert.', 'rh-sync'),
                 esc_html(size_format($bytes, 2) ?: $bytes . ' B'),
-                $duration
+                (int) $duration
             );
             echo '</p>';
         } else {
@@ -791,14 +810,16 @@ final class SyncPeersPage
         echo '<div class="rhbp-pull-result__header">';
         echo '<span class="dashicons dashicons-yes-alt" aria-hidden="true"></span>';
         echo '<strong>';
+        /* translators: %s = Peer-Name */
         printf(esc_html__('Pull von "%s" erfolgreich abgeschlossen', 'rh-sync'), esc_html($peerName));
         echo '</strong>';
         echo '</div>';
         echo '<p>';
         printf(
+            /* translators: %1$s = Datenmenge, %2$d = Dauer in Millisekunden */
             esc_html__('%1$s in %2$d ms gezogen und importiert. Du wurdest abgemeldet weil die Benutzer-Tabelle ersetzt wurde, jetzt bist du mit den neuen Zugangsdaten angemeldet.', 'rh-sync'),
             esc_html(size_format($bytes, 2) ?: $bytes . ' B'),
-            $duration
+            (int) $duration
         );
         echo '</p>';
         echo '</div>';
@@ -829,8 +850,10 @@ final class SyncPeersPage
         echo '<span class="dashicons dashicons-' . ($success ? 'yes-alt' : 'warning') . '" aria-hidden="true"></span>';
         echo '<strong>';
         if ($success) {
+            /* translators: %s = Peer-Name */
             printf(esc_html__('Push zu "%s" erfolgreich', 'rh-sync'), esc_html((string) $data['peer_name']));
         } else {
+            /* translators: %s = Peer-Name */
             printf(esc_html__('Push zu "%s" fehlgeschlagen', 'rh-sync'), esc_html((string) $data['peer_name']));
         }
         echo '</strong>';
@@ -840,18 +863,20 @@ final class SyncPeersPage
             echo '<p>';
             if ($remoteMs !== null) {
                 printf(
+                    /* translators: %1$s = Datenmenge, %2$d = Anzahl Chunks, %3$d = Gesamtdauer in Millisekunden, %4$d = Remote-Import-Dauer in Millisekunden */
                     esc_html__('%1$s in %2$d Chunks hochgeladen, %3$d ms gesamt (davon %4$d ms Remote-Import).', 'rh-sync'),
                     esc_html(size_format($bytes, 2) ?: $bytes . ' B'),
-                    $chunks,
-                    $duration,
-                    $remoteMs
+                    (int) $chunks,
+                    (int) $duration,
+                    (int) $remoteMs
                 );
             } else {
                 printf(
+                    /* translators: %1$s = Datenmenge, %2$d = Anzahl Chunks, %3$d = Dauer in Millisekunden */
                     esc_html__('%1$s in %2$d Chunks in %3$d ms hochgeladen.', 'rh-sync'),
                     esc_html(size_format($bytes, 2) ?: $bytes . ' B'),
-                    $chunks,
-                    $duration
+                    (int) $chunks,
+                    (int) $duration
                 );
             }
             echo '</p>';
@@ -888,12 +913,14 @@ final class SyncPeersPage
         echo '<div class="rhbp-choices">';
 
         echo '<button type="button" class="rhbp-choice" data-rhbp-modal-open="rhbp-modal-create">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<span class="rhbp-choice__icon">' . $this->icon('plus') . '</span>';
         echo '<span class="rhbp-choice__title">' . esc_html__('Verbindung erzeugen', 'rh-sync') . '</span>';
         echo '<span class="rhbp-choice__desc">' . esc_html__('Du startest. Du gibst der Gegenseite danach einen Code, mit dem sie sich koppelt.', 'rh-sync') . '</span>';
         echo '</button>';
 
         echo '<button type="button" class="rhbp-choice" data-rhbp-modal-open="rhbp-modal-join">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<span class="rhbp-choice__icon">' . $this->icon('inbox') . '</span>';
         echo '<span class="rhbp-choice__title">' . esc_html__('Code eingeben', 'rh-sync') . '</span>';
         echo '<span class="rhbp-choice__desc">' . esc_html__('Die andere Site hat schon eine Verbindung erzeugt? Füg ihren Code hier ein.', 'rh-sync') . '</span>';
@@ -914,6 +941,7 @@ final class SyncPeersPage
 
         // Kopf: Name + Status
         echo '<div class="rhbp-card__head">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, Peer-Name via esc_html escapt.
         echo '<span class="rhbp-card__title">' . $this->icon('site') . '<strong>' . esc_html($peer->name) . '</strong></span>';
         if ($isLocked) {
             $directionLabel = $lockDirection === SyncStatus::DIRECTION_PULL
@@ -926,6 +954,7 @@ final class SyncPeersPage
         echo '</div>';
 
         // URL
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- URL via esc_url, Anzeige via esc_html, Icon ist internes SVG aus festen Konstanten.
         echo '<a class="rhbp-extlink" style="margin:10px 0 14px;" href="' . esc_url($peer->url) . '" target="_blank" rel="noopener">' . esc_html($peer->url) . ' ' . $this->icon('external', 'sm') . '</a>';
 
         // Meta: letzter Sync + Profil-Pill
@@ -933,6 +962,7 @@ final class SyncPeersPage
         echo '<dt>' . esc_html__('Letzter Sync', 'rh-sync') . '</dt>';
         echo '<dd>' . ($peer->lastSync === null ? esc_html__('noch nie', 'rh-sync') : esc_html(wp_date('d.m.Y, H:i', (int) $peer->lastSync['timestamp']))) . '</dd>';
         echo '<dt>' . esc_html__('Profil', 'rh-sync') . '</dt>';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Markup wird in profilePill() bereits escapt.
         echo '<dd>' . $this->profilePill($peer->profile) . '</dd>';
         echo '</dl>';
 
@@ -949,6 +979,7 @@ final class SyncPeersPage
         wp_nonce_field(self::NONCE_PULL);
         echo '<input type="hidden" name="action" value="rhbp_peer_pull" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Disabled-/Title-Attribute aus festen Strings bzw. esc_attr__ gebaut, Icon ist internes SVG aus festen Konstanten.
         echo '<button type="submit" class="rhbp-btn rhbp-btn--primary"' . $pullDisabled . $pullTitle . '>' . $this->icon('pull', 'sm') . ' ' . esc_html__('Pull', 'rh-sync') . '</button>';
         echo '</form>';
 
@@ -957,12 +988,14 @@ final class SyncPeersPage
         wp_nonce_field(self::NONCE_PUSH);
         echo '<input type="hidden" name="action" value="rhbp_peer_push" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Disabled-/Title-Attribute aus festen Strings bzw. esc_attr__ gebaut, Icon ist internes SVG aus festen Konstanten.
         echo '<button type="submit" class="rhbp-btn"' . $pushDisabled . $pushTitle . '>' . $this->icon('push', 'sm') . ' ' . esc_html__('Push', 'rh-sync') . '</button>';
         echo '</form>';
 
         echo '<span class="rhbp-spacer"></span>';
 
         // Einstellungen (öffnet Settings-Modal dieses Peers)
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Attribute via esc_attr/esc_attr__, Icon ist internes SVG aus festen Konstanten.
         echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-open="rhbp-modal-settings-' . esc_attr($peer->id) . '" title="' . esc_attr__('Einstellungen', 'rh-sync') . '" aria-label="' . esc_attr__('Einstellungen', 'rh-sync') . '">' . $this->icon('gear') . '</button>';
 
         // Verbindung entfernen (Mülleimer direkt auf der Card)
@@ -970,6 +1003,7 @@ final class SyncPeersPage
         wp_nonce_field(self::NONCE_REMOVE);
         echo '<input type="hidden" name="action" value="rhbp_peer_remove" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Attribute via esc_attr__/esc_js, Icon ist internes SVG aus festen Konstanten.
         echo '<button type="submit" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon rhbp-btn--trash" title="' . esc_attr__('Verbindung entfernen', 'rh-sync') . '" aria-label="' . esc_attr__('Verbindung entfernen', 'rh-sync') . '" onclick="return confirm(\'' . esc_js(__('Verbindung wirklich entfernen?', 'rh-sync')) . '\')">' . $this->icon('trash') . '</button>';
         echo '</form>';
 
@@ -1037,12 +1071,14 @@ final class SyncPeersPage
         // Kopf
         echo '<div class="rhbp-modal__head">';
         echo '<div class="rhbp-modal__head-l">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<span class="rhbp-modal__head-icon">' . $this->icon('gear') . '</span>';
         echo '<div>';
         echo '<h3 class="rhbp-modal__title">' . esc_html(sprintf(/* translators: %s: peer name */ __('Einstellungen · %s', 'rh-sync'), $peer->name)) . '</h3>';
         echo '<p class="rhbp-modal__sub">' . esc_html($peer->url) . '</p>';
         echo '</div>';
         echo '</div>';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
         echo '</div>';
 
@@ -1122,6 +1158,7 @@ final class SyncPeersPage
 
         // Outbound
         echo '<div class="rhbp-fieldset">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Icon ist internes SVG aus festen Konstanten, Text via esc_html escapt.
         echo '<p class="rhbp-fieldset__title">' . $this->icon('arrow-right', 'sm') . ' ' . esc_html(sprintf(/* translators: %s: peer name */ __('Was ich bei %s darf', 'rh-sync'), $peer->name)) . '</p>';
         echo '<p class="rhbp-fieldset__sub">' . esc_html__('Sichert dich gegen versehentliche Aktionen. Du kannst eine Richtung sperren.', 'rh-sync') . '</p>';
         $this->renderCheckRow('allow_pull_from', sprintf(/* translators: %s: peer name */ __('Von %s ziehen (Pull)', 'rh-sync'), $peer->name), __('Daten von dort holen und hier einspielen.', 'rh-sync'), $p->allowPullFrom);
@@ -1130,12 +1167,15 @@ final class SyncPeersPage
 
         // Inbound
         echo '<div class="rhbp-fieldset">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Icon ist internes SVG aus festen Konstanten, Text via esc_html escapt.
         echo '<p class="rhbp-fieldset__title">' . $this->icon('lock', 'sm') . ' ' . esc_html(sprintf(/* translators: %s: peer name */ __('Was %s bei mir darf', 'rh-sync'), $peer->name)) . '</p>';
         echo '<p class="rhbp-fieldset__sub">' . esc_html__('Die echte Mauer: wird server-seitig erzwungen. Auf Produktion standardmäßig zu.', 'rh-sync') . '</p>';
         $this->renderCheckRow('allow_inbound_export', __('Bei mir abholen erlauben', 'rh-sync'), sprintf(/* translators: %s: peer name */ __('%s darf Daten von dieser Site ziehen.', 'rh-sync'), $peer->name), $p->allowInboundExport);
         $this->renderCheckRow('allow_inbound_import', __('Bei mir einspielen erlauben', 'rh-sync'), sprintf(/* translators: %s: peer name */ __('%s darf Daten in diese Site schreiben.', 'rh-sync'), $peer->name), $p->allowInboundImport);
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Icon ist internes SVG aus festen Konstanten, Text via esc_html__ escapt.
         echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:10px;">' . $this->icon('warning', 'sm') . '<span>' . esc_html__('Einspielen erlauben heißt: diese Gegenseite kann deine Datenbank komplett überschreiben, inklusive der Benutzer und Admin-Zugänge. Nur für Peers aktivieren, denen du voll vertraust. Der Pairing-Code ist dabei der Schlüssel und gehört nur über sichere Kanäle weitergegeben.', 'rh-sync') . '</span></div>';
         if (\RhBlueprint\Core\Environment::isProduction()) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Icon ist internes SVG aus festen Konstanten, Text via esc_html__ escapt.
             echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:10px;">' . $this->icon('warning', 'sm') . '<span>' . esc_html__('Diese Site ist als Produktion erkannt, Inbound ist standardmäßig aus.', 'rh-sync') . '</span></div>';
         }
         echo '</div>';
@@ -1166,6 +1206,7 @@ final class SyncPeersPage
         wp_nonce_field(self::NONCE_REGEN);
         echo '<input type="hidden" name="action" value="rhbp_peer_regenerate" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- onclick via esc_js, Icon ist internes SVG aus festen Konstanten, Label via esc_html__.
         echo '<button type="submit" class="rhbp-btn" onclick="return confirm(\'' . esc_js(__('Token neu erzeugen? Der alte Code wird ungültig, die Gegenseite muss neu gekoppelt werden.', 'rh-sync')) . '\')">' . $this->icon('refresh', 'sm') . ' ' . esc_html__('Token neu erzeugen', 'rh-sync') . '</button>';
         echo '</form>';
 
@@ -1228,6 +1269,7 @@ final class SyncPeersPage
             $profileSummary = '';
             if ($profileData !== null) {
                 $p = SyncProfile::fromArray($profileData);
+                /* translators: %d = Anzahl der aktiven Bereiche */
                 $profileSummary = $p->isFullSync() ? __('Voll', 'rh-sync') : sprintf(__('%d von 8', 'rh-sync'), $p->activeCount());
             }
 
@@ -1334,12 +1376,14 @@ final class SyncPeersPage
 
         echo '<div class="rhbp-modal__head">';
         echo '<div class="rhbp-modal__head-l">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<span class="rhbp-modal__head-icon">' . $this->icon('plus') . '</span>';
         echo '<div>';
         echo '<h3 class="rhbp-modal__title">' . esc_html__('Verbindung erzeugen', 'rh-sync') . '</h3>';
         echo '<p class="rhbp-modal__sub">' . esc_html__('Du startest die Kopplung und gibst der Gegenseite danach einen Code.', 'rh-sync') . '</p>';
         echo '</div>';
         echo '</div>';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
         echo '</div>';
 
@@ -1384,12 +1428,14 @@ final class SyncPeersPage
 
         echo '<div class="rhbp-modal__head">';
         echo '<div class="rhbp-modal__head-l">';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<span class="rhbp-modal__head-icon">' . $this->icon('inbox') . '</span>';
         echo '<div>';
         echo '<h3 class="rhbp-modal__title">' . esc_html__('Code eingeben', 'rh-sync') . '</h3>';
         echo '<p class="rhbp-modal__sub">' . esc_html__('Den Code hat dir die andere Site beim Erzeugen angezeigt.', 'rh-sync') . '</p>';
         echo '</div>';
         echo '</div>';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
         echo '</div>';
 
@@ -1437,6 +1483,7 @@ final class SyncPeersPage
         echo '<p class="rhbp-modal__sub" data-modal-subtitle></p>';
         echo '</div>';
         echo '</div>';
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
         echo '</div>';
 
@@ -1482,6 +1529,7 @@ final class SyncPeersPage
         echo '<h3 class="rhbp-sync-modal__standalone-title">' . esc_html__('Pull läuft im Hintergrund', 'rh-sync') . '</h3>';
         echo '<p class="rhbp-sync-modal__standalone-text">';
         printf(
+            /* translators: %s = Peer-Name (in fetter Schrift) */
             esc_html__('Der Server kopiert gerade die Daten von %s. Das dauert üblicherweise 30 bis 90 Sekunden.', 'rh-sync'),
             '<strong data-standalone-peer></strong>'
         );

@@ -3,3 +3,6 @@
 
 # Variante B: vendor wird vom Release-Workflow gebaut, nicht committed.
 /vendor/
+
+# WordPress.org-Build-Output (bin/build-wporg.sh)
+/dist/

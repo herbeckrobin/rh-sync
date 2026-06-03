@@ -102,12 +102,14 @@ final class SyncClient
         $response = wp_remote_get($url, $args);
 
         if (is_wp_error($response)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException('Download fehlgeschlagen: ' . $response->get_error_message());
         }
 
         $status = (int) wp_remote_retrieve_response_code($response);
 
         if ($status !== 200) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status);
         }
 
@@ -127,6 +129,7 @@ final class SyncClient
     {
         $fp = fopen($destination, 'wb');
         if ($fp === false) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException('Ziel-Datei kann nicht zum Schreiben geöffnet werden: ' . $destination);
         }
 
@@ -159,12 +162,16 @@ final class SyncClient
         fclose($fp);
 
         if ($ok === false) {
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer unvollständigen Download-Datei, ein Fehlschlag ist unkritisch.
             @unlink($destination);
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException('Download fehlgeschlagen: ' . $error);
         }
 
         if ($status !== 200) {
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer unvollständigen Download-Datei, ein Fehlschlag ist unkritisch.
             @unlink($destination);
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status);
         }
 

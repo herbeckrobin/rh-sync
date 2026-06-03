@@ -55,7 +55,8 @@ final class PullOperation
             $manifest = $this->fetchManifest($peer);
             $phaseTimings['manifest'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_MANIFEST, sprintf(
-                __('Quelle erreichbar: WP %s, Plugin %s', 'rh-sync'),
+                /* translators: %1$s = WordPress-Version, %2$s = Plugin-Version */
+                __('Quelle erreichbar: WP %1$s, Plugin %2$s', 'rh-sync'),
                 (string) ($manifest['wp_version'] ?? '?'),
                 (string) ($manifest['plugin_version'] ?? '?')
             ));
@@ -67,6 +68,7 @@ final class PullOperation
             $exportInfo = $this->triggerExport($peer, $effectiveProfile);
             $phaseTimings['export'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_EXPORT, sprintf(
+                /* translators: %s = Datenmenge */
                 __('Snapshot bereit (%s)', 'rh-sync'),
                 size_format((int) ($exportInfo['size'] ?? 0))
             ));
@@ -81,6 +83,7 @@ final class PullOperation
             $phaseTimings['download'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::progress($jobId, $totalSize, $totalSize);
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_DOWNLOAD, sprintf(
+                /* translators: %s = Datenmenge */
                 __('%s heruntergeladen', 'rh-sync'),
                 size_format($totalSize)
             ));
@@ -101,6 +104,7 @@ final class PullOperation
             $phaseTimings['import'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_IMPORT, __('Import abgeschlossen', 'rh-sync'));
 
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer temporären Download-Datei, ein Fehlschlag ist unkritisch.
             @unlink($localZip);
 
             $bytes = $totalSize;
@@ -173,11 +177,13 @@ final class PullOperation
         $response = $this->client->request($peer, 'GET', '/rhbp/v1/sync/manifest');
 
         if (!$response->isSuccess()) {
+            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPullResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException(sprintf(
                 'Manifest-Request fehlgeschlagen (HTTP %d): %s',
                 $response->status,
                 $response->error ?? $this->extractErrorMessage($response)
             ));
+            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
         $data = $response->json();
@@ -198,11 +204,13 @@ final class PullOperation
         ]);
 
         if (!$response->isSuccess()) {
+            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPullResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException(sprintf(
                 'Export-Request fehlgeschlagen (HTTP %d): %s',
                 $response->status,
                 $response->error ?? $this->extractErrorMessage($response)
             ));
+            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
         $data = $response->json();
@@ -260,17 +268,21 @@ final class PullOperation
             try {
                 $this->importer->importFromFile($safetyBackup);
             } catch (\Throwable $rollbackError) {
+                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPullResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
                 throw new \RuntimeException(sprintf(
                     'Import fehlgeschlagen (%s) UND Rollback fehlgeschlagen (%s). Manuelle Wiederherstellung nötig: %s',
                     $e->getMessage(),
                     $rollbackError->getMessage(),
                     $safetyBackup
                 ));
+                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
             }
+            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPullResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException(sprintf(
                 'Import fehlgeschlagen: %s. Safety-Backup wurde zurückgespielt.',
                 $e->getMessage()
             ));
+            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
         $guard->restore($snapshot);
