@@ -36,8 +36,13 @@ final class Peer
     }
 
     /**
-     * Erzeugt einen Pairing-Code, den man auf der Gegenseite im Add-Form einfuegen kann.
-     * Enthält die UUID + das Token (+ Name/URL als Defaults), base64-kodiert.
+     * Erzeugt einen Pairing-Code, den man auf der Gegenseite im "Code eingeben"-Dialog
+     * einfügt. Enthält die geteilte UUID + das Token, base64-kodiert.
+     *
+     * WICHTIG: Name und URL im Code sind die der EIGENEN Site (home_url + eigener
+     * Site-Name), NICHT die des Peer-Objekts (das die Gegenseite beschreibt). So legt
+     * die Gegenseite einen Peer an, der zurück auf mich zeigt, und beide Seiten können
+     * hin und her synchronisieren.
      *
      * SICHERHEIT: Der Code enthält das Token im Klartext. Darf nur über sichere Kanaele
      * weitergegeben werden (1Password, verschlüsselte Messenger, direkt am Geraet).
@@ -48,11 +53,21 @@ final class Peer
             'v' => 1,
             'id' => $this->id,
             'token' => $this->token,
-            'name' => $this->name,
-            'url' => $this->url,
+            'name' => self::ownSiteName(),
+            'url' => home_url(),
         ];
 
         return base64_encode((string) wp_json_encode($payload));
+    }
+
+    /**
+     * Default-Name, unter dem die Gegenseite diese Site sieht: der Host der eigenen
+     * Domain (technisch eindeutig, auf der Gegenseite frei umbenennbar).
+     */
+    private static function ownSiteName(): string
+    {
+        $host = (string) wp_parse_url(home_url(), PHP_URL_HOST);
+        return $host !== '' ? $host : (string) get_bloginfo('name');
     }
 
     /**

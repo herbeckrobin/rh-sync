@@ -109,21 +109,78 @@ final class SyncPeersPage
             return;
         }
 
-        echo '<div class="rhbp-sync" data-rhbp-sync data-ajax-url="' . esc_attr(admin_url('admin-ajax.php')) . '" data-ajax-nonce="' . esc_attr(wp_create_nonce(self::NONCE_AJAX)) . '">';
-        echo '<h2 class="rhbp-sync__heading">' . esc_html__('Sync Network', 'rh-sync') . '</h2>';
-        echo '<p class="rhbp-sync__intro">' . esc_html__('Peers sind andere WordPress-Instanzen, mit denen diese Site Datenbank und Uploads synchronisieren kann. Jeder Peer hat ein eigenes Sync-Profil, du legst fest, welche Bereiche übertragen werden.', 'rh-sync') . '</p>';
+        $peers = $this->registry->all();
 
-        $this->renderNewTokenNotice();
+        echo '<div class="rhbp-sync" data-rhbp-sync data-ajax-url="' . esc_attr(admin_url('admin-ajax.php')) . '" data-ajax-nonce="' . esc_attr(wp_create_nonce(self::NONCE_AJAX)) . '">';
+
+        // Kopf: Titel + (wenn Peers da) die zwei Aktionen. Im Leerzustand sind die
+        // zwei Wege die grossen Kacheln im Empty-State.
+        echo '<div class="rhbp-sync__head">';
+        echo '<div class="rhbp-sync__head-text">';
+        echo '<h2 class="rhbp-sync__heading">' . esc_html__('Sync', 'rh-sync') . '</h2>';
+        if ($peers === []) {
+            echo '<p class="rhbp-sync__intro">' . esc_html__('Eine Verbindung koppelt diese Site mit einer anderen WordPress-Instanz, die rh-sync aktiv hat. Danach kannst du Datenbank und Mediathek in beide Richtungen abgleichen.', 'rh-sync') . '</p>';
+        } else {
+            printf(
+                '<p class="rhbp-sync__intro">%s</p>',
+                esc_html(sprintf(
+                    /* translators: %d: number of connections */
+                    _n('%d Verbindung.', '%d Verbindungen.', count($peers), 'rh-sync'),
+                    count($peers)
+                ))
+            );
+        }
+        echo '</div>';
+        if ($peers !== []) {
+            echo '<div class="rhbp-sync__head-actions">';
+            echo '<button type="button" class="rhbp-btn" data-rhbp-modal-open="rhbp-modal-join">' . $this->icon('inbox', 'sm') . ' ' . esc_html__('Code eingeben', 'rh-sync') . '</button>';
+            echo '<button type="button" class="rhbp-btn rhbp-btn--primary" data-rhbp-modal-open="rhbp-modal-create">' . $this->icon('plus', 'sm') . ' ' . esc_html__('Verbindung erzeugen', 'rh-sync') . '</button>';
+            echo '</div>';
+        }
+        echo '</div>';
+
         $this->renderPullResultNotice();
         $this->renderPushResultNotice();
-        $this->renderPeerList();
-        $this->renderAddForm();
+        $this->renderPeerList($peers);
         $this->renderHistory();
 
-        // Modal-Template am Ende (versteckt, wird per JS aktiviert)
+        // Modals (versteckt, per JS geoeffnet)
+        $this->renderCreateModal();
+        $this->renderJoinModal();
+        $this->renderCodeModal();
         $this->renderSyncModalTemplate();
 
         echo '</div>';
+    }
+
+    /**
+     * Inline-SVG-Icons (feine Linien, wie im abgenommenen Prototyp). Plugin-lokaler
+     * Helfer, haelt das Markup schlank.
+     */
+    private function icon(string $name, string $size = ''): string
+    {
+        $paths = [
+            'plus' => '<path d="M12 5v14M5 12h14"/>',
+            'inbox' => '<path d="M4 7v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7M4 7l8 6 8-6"/>',
+            'site' => '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+            'external' => '<path d="M14 4h6v6M20 4l-9 9M19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>',
+            'pull' => '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+            'push' => '<path d="M12 21V9M7 14l5-5 5 5M5 3h14"/>',
+            'gear' => '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+            'close' => '<path d="M6 6l12 12M18 6L6 18"/>',
+            'check' => '<path d="M20 6 9 17l-5-5"/>',
+            'copy' => '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+            'refresh' => '<path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/>',
+            'trash' => '<path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/>',
+            'arrow-right' => '<path d="M5 12h14M13 6l6 6-6 6"/>',
+            'lock' => '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+            'warning' => '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/>',
+        ];
+
+        $path = $paths[$name] ?? '';
+        $cls = 'rhbp-ico' . ($size === 'sm' ? ' rhbp-ico--sm' : '');
+
+        return '<svg class="' . $cls . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . $path . '</svg>';
     }
 
     public function handleAdd(): void
@@ -173,10 +230,14 @@ final class SyncPeersPage
         );
         $this->registry->add($peer);
 
-        set_transient(self::NEW_TOKEN_TRANSIENT_PREFIX . get_current_user_id(), [
-            'peer_id' => $peer->id,
-            'token' => $peer->token,
-        ], 60);
+        // Nur beim Erzeugen-Weg (kein Pairing-Code eingegeben) zeigen wir danach den
+        // eigenen Pairing-Code zum Weitergeben. Der Code-eingeben-Weg ist sofort fertig.
+        if ($pairing === null) {
+            set_transient(self::NEW_TOKEN_TRANSIENT_PREFIX . get_current_user_id(), [
+                'peer_id' => $peer->id,
+                'token' => $peer->token,
+            ], 60);
+        }
 
         $this->redirect('peer_added');
     }
@@ -384,7 +445,7 @@ final class SyncPeersPage
 
         $jobId = SyncStatus::start($peer->id, SyncStatus::DIRECTION_PULL, $peer->profile);
 
-        // Sofort Response senden, Connection schliessen, dann Operation ausfuehren
+        // Sofort Response senden, Connection schließen, dann Operation ausfuehren
         $this->respondAndDetach(['job_id' => $jobId]);
 
         try {
@@ -439,7 +500,7 @@ final class SyncPeersPage
     }
 
     /**
-     * Status nach Anzeige aufraeumen (auf "Schliessen" im Modal).
+     * Status nach Anzeige aufraeumen (auf "Schließen" im Modal).
      */
     public function ajaxSyncClear(): void
     {
@@ -481,7 +542,7 @@ final class SyncPeersPage
     }
 
     /**
-     * Sendet sofort eine JSON-Response, schliesst die Connection und gibt Steuerung
+     * Sendet sofort eine JSON-Response, schließt die Connection und gibt Steuerung
      * an den Caller zurück damit die lange Operation im selben Request weiterläuft.
      *
      * @param array<string, mixed> $payload
@@ -510,7 +571,7 @@ final class SyncPeersPage
         }
         @flush();
 
-        // PHP-FPM: Connection sauber schliessen, PHP arbeitet weiter
+        // PHP-FPM: Connection sauber schließen, PHP arbeitet weiter
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }
@@ -562,7 +623,11 @@ final class SyncPeersPage
     // Rendering
     // ============================================================
 
-    private function renderNewTokenNotice(): void
+    /**
+     * Code-Modal, öffnet automatisch nach "Verbindung erzeugen" und zeigt den
+     * eigenen Pairing-Code zum Weitergeben an die Gegenseite.
+     */
+    private function renderCodeModal(): void
     {
         $transientKey = self::NEW_TOKEN_TRANSIENT_PREFIX . get_current_user_id();
         $data = get_transient($transientKey);
@@ -580,17 +645,40 @@ final class SyncPeersPage
 
         $pairingCode = $peer->makePairingCode();
 
-        echo '<div class="rhbp-sync-token-notice">';
-        echo '<div class="rhbp-sync-token-notice__header">';
-        echo '<span class="dashicons dashicons-shield" aria-hidden="true"></span>';
-        echo '<strong>' . esc_html__('Pairing-Code für Peer', 'rh-sync') . ' „' . esc_html($peer->name) . '"</strong>';
+        echo '<div class="rhbp-modal-backdrop is-open" id="rhbp-modal-code" data-rhbp-modal-backdrop>';
+        echo '<div class="rhbp-modal" role="dialog" aria-modal="true">';
+
+        echo '<div class="rhbp-modal__head">';
+        echo '<div class="rhbp-modal__head-l">';
+        echo '<span class="rhbp-modal__head-icon rhbp-modal__head-icon--ok">' . $this->icon('check') . '</span>';
+        echo '<div>';
+        echo '<h3 class="rhbp-modal__title">' . esc_html(sprintf(/* translators: %s: peer name */ __('Verbindung „%s" erstellt', 'rh-sync'), $peer->name)) . '</h3>';
+        echo '<p class="rhbp-modal__sub">' . esc_html__('Ein Schritt fehlt noch auf der anderen Site.', 'rh-sync') . '</p>';
         echo '</div>';
-        echo '<p>' . esc_html__('Kopiere diesen Code und fuege ihn auf der Gegenseite im Feld "Pairing-Code" ein. Er enthält die UUID + das geteilte Token für die HMAC-Authentifizierung. Wird nach dem Verlassen dieser Seite nicht mehr angezeigt.', 'rh-sync') . '</p>';
-        echo '<code class="rhbp-sync-token-notice__token">' . esc_html($pairingCode) . '</code>';
-        echo '<details class="rhbp-sync-token-notice__details">';
-        echo '<summary>' . esc_html__('Nur das Rohtoken anzeigen', 'rh-sync') . '</summary>';
-        echo '<code>' . esc_html((string) $data['token']) . '</code>';
-        echo '</details>';
+        echo '</div>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
+        echo '</div>';
+
+        echo '<div class="rhbp-modal__body">';
+        echo '<p style="margin-top:0;">' . wp_kses(
+            sprintf(/* translators: %s: bold path "Sync -> Code eingeben" */ __('Öffne auf der anderen Site %s und füg diesen Code ein:', 'rh-sync'), '<strong>' . esc_html__('Sync → Code eingeben', 'rh-sync') . '</strong>'),
+            ['strong' => []]
+        ) . '</p>';
+
+        echo '<div class="rhbp-codebox">';
+        echo '<code id="rhbp-pairing-code">' . esc_html($pairingCode) . '</code>';
+        echo '<button type="button" class="rhbp-btn" data-rhbp-copy="#rhbp-pairing-code" title="' . esc_attr__('Kopieren', 'rh-sync') . '" aria-label="' . esc_attr__('Code kopieren', 'rh-sync') . '">' . $this->icon('copy', 'sm') . '</button>';
+        echo '</div>';
+
+        echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:14px;">' . $this->icon('lock', 'sm') . '<span>' . esc_html__('Der Code enthält ein geheimes Token. Gib ihn nur über einen sicheren Weg weiter (1Password, verschlüsselter Chat), nicht offen. Nach dem Schließen ist er nicht mehr abrufbar, dann nur noch neu erzeugen.', 'rh-sync') . '</span></div>';
+
+        echo '</div>';
+
+        echo '<div class="rhbp-modal__foot">';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--primary" data-rhbp-modal-close>' . esc_html__('Fertig', 'rh-sync') . '</button>';
+        echo '</div>';
+
+        echo '</div>';
         echo '</div>';
     }
 
@@ -765,21 +853,43 @@ final class SyncPeersPage
         echo '</div>';
     }
 
-    private function renderPeerList(): void
+    /**
+     * @param array<int, Peer> $peers
+     */
+    private function renderPeerList(array $peers): void
     {
-        $peers = $this->registry->all();
-
         if ($peers === []) {
-            echo '<div class="rhbp-empty rhbp-sync__empty">';
-            echo esc_html__('Noch keine Peers. Lege unten den ersten an um loszulegen.', 'rh-sync');
-            echo '</div>';
+            $this->renderEmptyState();
             return;
         }
 
-        echo '<div class="rhbp-peer-grid">';
+        echo '<div class="rhbp-card-grid">';
         foreach ($peers as $peer) {
             $this->renderPeerCard($peer);
         }
+        echo '</div>';
+    }
+
+    /**
+     * Leerzustand: die zwei Wege als grosse Auswahl-Kacheln.
+     */
+    private function renderEmptyState(): void
+    {
+        echo '<p class="rhbp-sync__empty-hint">' . esc_html__('Noch keine Verbindung eingerichtet. Wie willst du starten?', 'rh-sync') . '</p>';
+        echo '<div class="rhbp-choices">';
+
+        echo '<button type="button" class="rhbp-choice" data-rhbp-modal-open="rhbp-modal-create">';
+        echo '<span class="rhbp-choice__icon">' . $this->icon('plus') . '</span>';
+        echo '<span class="rhbp-choice__title">' . esc_html__('Verbindung erzeugen', 'rh-sync') . '</span>';
+        echo '<span class="rhbp-choice__desc">' . esc_html__('Du startest. Du gibst der Gegenseite danach einen Code, mit dem sie sich koppelt.', 'rh-sync') . '</span>';
+        echo '</button>';
+
+        echo '<button type="button" class="rhbp-choice" data-rhbp-modal-open="rhbp-modal-join">';
+        echo '<span class="rhbp-choice__icon">' . $this->icon('inbox') . '</span>';
+        echo '<span class="rhbp-choice__title">' . esc_html__('Code eingeben', 'rh-sync') . '</span>';
+        echo '<span class="rhbp-choice__desc">' . esc_html__('Die andere Site hat schon eine Verbindung erzeugt? Füg ihren Code hier ein.', 'rh-sync') . '</span>';
+        echo '</button>';
+
         echo '</div>';
     }
 
@@ -789,211 +899,279 @@ final class SyncPeersPage
         $isLocked = $activeJob !== null;
         $lockDirection = $isLocked ? (string) ($activeJob['direction'] ?? '') : '';
 
-        echo '<div class="rhbp-peer-card" data-peer-id="' . esc_attr($peer->id) . '" data-peer-name="' . esc_attr($peer->name) . '"' . ($isLocked ? ' data-active-job="' . esc_attr((string) $activeJob['job_id']) . '"' : '') . '>';
+        // data-peer-id ist der JS-Hook (Pull/Push-Bindings, Lock-State), keine
+        // eigene CSS-Klasse noetig, die Card nutzt nur die generische .rhbp-card.
+        echo '<div class="rhbp-card" data-peer-id="' . esc_attr($peer->id) . '" data-peer-name="' . esc_attr($peer->name) . '"' . ($isLocked ? ' data-active-job="' . esc_attr((string) $activeJob['job_id']) . '"' : '') . '>';
 
-        echo '<div class="rhbp-peer-card__header">';
-        echo '<div class="rhbp-peer-card__title">';
-        echo '<span class="dashicons dashicons-admin-site-alt3" aria-hidden="true"></span>';
-        echo '<strong>' . esc_html($peer->name) . '</strong>';
-        echo '</div>';
-
+        // Kopf: Name + Status
+        echo '<div class="rhbp-card__head">';
+        echo '<span class="rhbp-card__title">' . $this->icon('site') . '<strong>' . esc_html($peer->name) . '</strong></span>';
         if ($isLocked) {
             $directionLabel = $lockDirection === SyncStatus::DIRECTION_PULL
                 ? __('Pull läuft', 'rh-sync')
                 : __('Push läuft', 'rh-sync');
-            echo '<span class="rhbp-peer-card__status rhbp-peer-card__status--syncing"><span class="rhbp-spinner-dot" aria-hidden="true"></span> ' . esc_html($directionLabel) . '</span>';
+            echo '<span class="rhbp-pill rhbp-pill--accent"><span class="rhbp-pill__dot" aria-hidden="true"></span> ' . esc_html($directionLabel) . '</span>';
         } else {
-            echo '<span class="rhbp-peer-card__status rhbp-peer-card__status--idle">' . esc_html__('Bereit', 'rh-sync') . '</span>';
+            echo '<span class="rhbp-pill">' . esc_html__('Bereit', 'rh-sync') . '</span>';
         }
         echo '</div>';
 
-        echo '<a class="rhbp-peer-card__url" href="' . esc_url($peer->url) . '" target="_blank" rel="noopener">' . esc_html($peer->url) . ' <span class="dashicons dashicons-external" aria-hidden="true"></span></a>';
+        // URL
+        echo '<a class="rhbp-extlink" style="margin:10px 0 14px;" href="' . esc_url($peer->url) . '" target="_blank" rel="noopener">' . esc_html($peer->url) . ' ' . $this->icon('external', 'sm') . '</a>';
 
-        echo '<dl class="rhbp-peer-card__meta">';
-        echo '<dt>' . esc_html__('Token', 'rh-sync') . '</dt>';
-        echo '<dd><code>' . esc_html($peer->maskedToken()) . '</code></dd>';
-        echo '<dt>' . esc_html__('Erstellt', 'rh-sync') . '</dt>';
-        echo '<dd>' . esc_html(wp_date('Y-m-d H:i', $peer->createdAt)) . '</dd>';
+        // Meta: letzter Sync + Profil-Pill
+        echo '<dl class="rhbp-meta" style="margin-bottom:4px;">';
         echo '<dt>' . esc_html__('Letzter Sync', 'rh-sync') . '</dt>';
-        echo '<dd>' . esc_html($peer->lastSync === null ? ', ' : wp_date('Y-m-d H:i', (int) $peer->lastSync['timestamp'])) . '</dd>';
+        echo '<dd>' . ($peer->lastSync === null ? esc_html__('noch nie', 'rh-sync') : esc_html(wp_date('d.m.Y, H:i', (int) $peer->lastSync['timestamp']))) . '</dd>';
+        echo '<dt>' . esc_html__('Profil', 'rh-sync') . '</dt>';
+        echo '<dd>' . $this->profilePill($peer->profile) . '</dd>';
         echo '</dl>';
 
-        // Profil-Sektion
-        $this->renderProfileSection($peer);
+        // Aktionen: Pull, Push, Einstellungen
+        echo '<div class="rhbp-card__actions">';
 
-        // Berechtigungen
-        $this->renderPermissionsSection($peer);
-
-        // Action-Bar
-        echo '<div class="rhbp-peer-card__actions">';
-
-        // Outbound-Gating: Buttons sind aus, wenn ein Sync läuft ODER die lokale
-        // Permission die Richtung verbietet.
         $pullDisabled = ($isLocked || ! $peer->permissions->allowPullFrom) ? ' disabled aria-disabled="true"' : '';
         $pushDisabled = ($isLocked || ! $peer->permissions->allowPushTo) ? ' disabled aria-disabled="true"' : '';
-        $pullTitle = ! $peer->permissions->allowPullFrom ? ' title="' . esc_attr__('Pull von diesem Peer ist deaktiviert.', 'rh-sync') . '"' : '';
-        $pushTitle = ! $peer->permissions->allowPushTo ? ' title="' . esc_attr__('Push zu diesem Peer ist deaktiviert.', 'rh-sync') . '"' : '';
+        $pullTitle = ! $peer->permissions->allowPullFrom ? ' title="' . esc_attr__('Pull von dieser Site ist in den Einstellungen deaktiviert.', 'rh-sync') . '"' : '';
+        $pushTitle = ! $peer->permissions->allowPushTo ? ' title="' . esc_attr__('Push zu dieser Site ist in den Einstellungen deaktiviert.', 'rh-sync') . '"' : '';
 
-        // Pull (triggert JS-Modal, fallback admin-post)
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="rhbp-peer-card__action-form" data-action="pull">';
+        // Pull (JS hijackt submit -> Progress-Modal, fallback admin-post)
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="rhbp-peer-action" data-action="pull">';
         wp_nonce_field(self::NONCE_PULL);
         echo '<input type="hidden" name="action" value="rhbp_peer_pull" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
-        echo '<button type="submit" class="button button-primary rhbp-peer-card__pull"' . $pullDisabled . $pullTitle . '>';
-        echo '<span class="dashicons dashicons-download" aria-hidden="true"></span> ' . esc_html__('Pull', 'rh-sync');
-        echo '</button>';
+        echo '<button type="submit" class="rhbp-btn rhbp-btn--primary"' . $pullDisabled . $pullTitle . '>' . $this->icon('pull', 'sm') . ' ' . esc_html__('Pull', 'rh-sync') . '</button>';
         echo '</form>';
 
         // Push
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="rhbp-peer-card__action-form" data-action="push">';
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="rhbp-peer-action" data-action="push">';
         wp_nonce_field(self::NONCE_PUSH);
         echo '<input type="hidden" name="action" value="rhbp_peer_push" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
-        echo '<button type="submit" class="button rhbp-peer-card__push"' . $pushDisabled . $pushTitle . '>';
-        echo '<span class="dashicons dashicons-upload" aria-hidden="true"></span> ' . esc_html__('Push', 'rh-sync');
-        echo '</button>';
+        echo '<button type="submit" class="rhbp-btn"' . $pushDisabled . $pushTitle . '>' . $this->icon('push', 'sm') . ' ' . esc_html__('Push', 'rh-sync') . '</button>';
         echo '</form>';
 
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="display:inline">';
-        wp_nonce_field(self::NONCE_REGEN);
-        echo '<input type="hidden" name="action" value="rhbp_peer_regenerate" />';
-        echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
-        echo '<button type="submit" class="button" onclick="return confirm(\'Token neu generieren? Das alte Token wird ungültig.\')">';
-        echo '<span class="dashicons dashicons-update" aria-hidden="true"></span> ' . esc_html__('Token neu', 'rh-sync');
-        echo '</button>';
-        echo '</form>';
+        echo '<span class="rhbp-spacer"></span>';
 
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="display:inline">';
+        // Einstellungen (öffnet Settings-Modal dieses Peers)
+        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-open="rhbp-modal-settings-' . esc_attr($peer->id) . '" title="' . esc_attr__('Einstellungen', 'rh-sync') . '" aria-label="' . esc_attr__('Einstellungen', 'rh-sync') . '">' . $this->icon('gear') . '</button>';
+
+        // Verbindung entfernen (Mülleimer direkt auf der Card)
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="display:flex;">';
         wp_nonce_field(self::NONCE_REMOVE);
         echo '<input type="hidden" name="action" value="rhbp_peer_remove" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
-        echo '<button type="submit" class="button button-link-delete" onclick="return confirm(\'Peer wirklich entfernen?\')">';
-        echo '<span class="dashicons dashicons-trash" aria-hidden="true"></span> ' . esc_html__('Entfernen', 'rh-sync');
-        echo '</button>';
+        echo '<button type="submit" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon rhbp-btn--trash" title="' . esc_attr__('Verbindung entfernen', 'rh-sync') . '" aria-label="' . esc_attr__('Verbindung entfernen', 'rh-sync') . '" onclick="return confirm(\'' . esc_js(__('Verbindung wirklich entfernen?', 'rh-sync')) . '\')">' . $this->icon('trash') . '</button>';
         echo '</form>';
 
         echo '</div>';
-        echo '</div>';
+        echo '</div>'; // .rhbp-card
+
+        // Settings-Modal für diesen Peer (versteckt)
+        $this->renderSettingsModal($peer);
     }
 
-    private function renderProfileSection(Peer $peer): void
+    /**
+     * Profil-Pill für die Card: "Voll" oder benannte Schnellwahl + Anzahl.
+     */
+    private function profilePill(SyncProfile $profile): string
     {
-        $profile = $peer->profile;
-        $labels = SyncProfile::groupLabels();
-        $descriptions = SyncProfile::groupDescriptions();
-        $flags = $profile->toArray();
+        if ($profile->isFullSync()) {
+            return '<span class="rhbp-pill rhbp-pill--ok">' . esc_html__('Voll', 'rh-sync') . '</span>';
+        }
 
-        // Icons je Gruppe
-        $icons = [
-            'content' => 'admin-post',
-            'taxonomies' => 'category',
-            'comments' => 'admin-comments',
-            'users' => 'admin-users',
-            'options' => 'admin-settings',
-            'links' => 'admin-links',
-            'customTables' => 'database',
-            'uploads' => 'images-alt2',
+        $preset = $this->presetName($profile);
+        $count = $profile->activeCount();
+        $text = ($preset !== null ? $preset . ' · ' : '') . sprintf(
+            /* translators: %d: number of active areas */
+            __('%d von 8', 'rh-sync'),
+            $count
+        );
+
+        return '<span class="rhbp-pill rhbp-pill--warn">' . esc_html($text) . '</span>';
+    }
+
+    /**
+     * Erkennt ob das Profil einer bekannten Schnellwahl entspricht (für die Pill).
+     */
+    private function presetName(SyncProfile $profile): ?string
+    {
+        $flags = array_map('intval', $profile->toArray());
+
+        $presets = [
+            __('Ohne Benutzer', 'rh-sync') => ['content' => 1, 'taxonomies' => 1, 'comments' => 1, 'users' => 0, 'options' => 1, 'links' => 1, 'customTables' => 1, 'uploads' => 1],
+            __('Nur Inhalte + Medien', 'rh-sync') => ['content' => 1, 'taxonomies' => 1, 'comments' => 0, 'users' => 0, 'options' => 0, 'links' => 0, 'customTables' => 0, 'uploads' => 1],
+            __('Nur DB', 'rh-sync') => ['content' => 1, 'taxonomies' => 1, 'comments' => 1, 'users' => 1, 'options' => 1, 'links' => 1, 'customTables' => 1, 'uploads' => 0],
         ];
 
-        echo '<div class="rhbp-peer-card__profile">';
-
-        // Header mit Summary-Pill
-        echo '<div class="rhbp-profile__header">';
-        echo '<h4><span class="dashicons dashicons-filter" aria-hidden="true"></span> ' . esc_html__('Sync-Profil', 'rh-sync') . '</h4>';
-        $summaryClass = $profile->isFullSync() ? 'rhbp-profile-pill--full' : 'rhbp-profile-pill--partial';
-        echo '<span class="rhbp-profile-pill ' . esc_attr($summaryClass) . '">';
-        if ($profile->isFullSync()) {
-            echo esc_html__('Voll', 'rh-sync');
-        } else {
-            printf(esc_html__('%d von 8 aktiv', 'rh-sync'), $profile->activeCount());
+        foreach ($presets as $label => $cfg) {
+            if ($flags === $cfg) {
+                return (string) $label;
+            }
         }
-        echo '</span>';
+
+        return null;
+    }
+
+    /**
+     * Einstellungen-Modal eines Peers: drei Tabs (Sync-Profil, Berechtigungen,
+     * Verbindung). Versteckt, wird per Zahnrad-Klick geoeffnet. Jeder Tab ist ein
+     * echtes admin-post-Form, funktioniert also auch ohne JS.
+     */
+    private function renderSettingsModal(Peer $peer): void
+    {
+        $modalId = 'rhbp-modal-settings-' . $peer->id;
+
+        echo '<div class="rhbp-modal-backdrop" id="' . esc_attr($modalId) . '" data-rhbp-modal-backdrop>';
+        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr(sprintf(/* translators: %s: peer name */ __('Einstellungen für %s', 'rh-sync'), $peer->name)) . '">';
+
+        // Kopf
+        echo '<div class="rhbp-modal__head">';
+        echo '<div class="rhbp-modal__head-l">';
+        echo '<span class="rhbp-modal__head-icon">' . $this->icon('gear') . '</span>';
+        echo '<div>';
+        echo '<h3 class="rhbp-modal__title">' . esc_html(sprintf(/* translators: %s: peer name */ __('Einstellungen · %s', 'rh-sync'), $peer->name)) . '</h3>';
+        echo '<p class="rhbp-modal__sub">' . esc_html($peer->url) . '</p>';
+        echo '</div>';
+        echo '</div>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
         echo '</div>';
 
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="rhbp-profile-form" data-profile-form>';
+        echo '<div class="rhbp-modal__body">';
+
+        // Sub-Tabs
+        echo '<div class="rhbp-subtabs">';
+        echo '<button type="button" class="rhbp-subtab is-active" data-rhbp-subtab="profile">' . esc_html__('Sync-Profil', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-subtab" data-rhbp-subtab="perms">' . esc_html__('Berechtigungen', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-subtab" data-rhbp-subtab="conn">' . esc_html__('Verbindung', 'rh-sync') . '</button>';
+        echo '</div>';
+
+        $this->renderProfilePane($peer);
+        $this->renderPermsPane($peer);
+        $this->renderConnPane($peer);
+
+        echo '</div>'; // body
+        echo '</div>'; // modal
+        echo '</div>'; // backdrop
+    }
+
+    private function renderProfilePane(Peer $peer): void
+    {
+        $labels = SyncProfile::groupLabels();
+        $descriptions = SyncProfile::groupDescriptions();
+        $flags = $peer->profile->toArray();
+
+        echo '<div class="rhbp-tabpane is-active" data-rhbp-pane="profile">';
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" data-profile-form>';
         wp_nonce_field(self::NONCE_PROFILE);
         echo '<input type="hidden" name="action" value="rhbp_peer_update_profile" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
 
-        echo '<div class="rhbp-profile-grid">';
+        echo '<p class="rhbp-pane-intro">' . esc_html__('Welche Daten werden mit dieser Site abgeglichen? Gilt für Pull und Push.', 'rh-sync') . '</p>';
+
+        echo '<div class="rhbp-option-grid">';
         foreach ($labels as $key => $label) {
             $checked = !empty($flags[$key]);
-            $icon = $icons[$key] ?? 'marker';
             $desc = $descriptions[$key] ?? '';
-
-            echo '<label class="rhbp-profile-item' . ($checked ? ' is-checked' : '') . '">';
+            echo '<label class="rhbp-option' . ($checked ? ' is-checked' : '') . '">';
             echo '<input type="checkbox" name="profile[' . esc_attr($key) . ']" value="1"' . ($checked ? ' checked' : '') . ' data-profile-flag="' . esc_attr($key) . '" />';
-            echo '<span class="rhbp-profile-item__inner">';
-            echo '<span class="dashicons dashicons-' . esc_attr($icon) . '" aria-hidden="true"></span>';
-            echo '<span class="rhbp-profile-item__text">';
-            echo '<span class="rhbp-profile-item__label">' . esc_html($label) . '</span>';
-            echo '<span class="rhbp-profile-item__desc">' . esc_html($desc) . '</span>';
-            echo '</span>';
+            echo '<span class="rhbp-option__text">';
+            echo '<span class="rhbp-option__label">' . esc_html($label) . '</span>';
+            echo '<span class="rhbp-option__desc">' . esc_html($desc) . '</span>';
             echo '</span>';
             echo '</label>';
         }
         echo '</div>';
 
-        // Preset-Buttons
-        echo '<div class="rhbp-profile-presets">';
-        echo '<span class="rhbp-profile-presets__label">' . esc_html__('Voreinstellungen:', 'rh-sync') . '</span>';
-        echo '<button type="button" class="button-link rhbp-preset-button" data-preset="all">' . esc_html__('Alles', 'rh-sync') . '</button>';
-        echo '<button type="button" class="button-link rhbp-preset-button" data-preset="no-users">' . esc_html__('Ohne Benutzer', 'rh-sync') . '</button>';
-        echo '<button type="button" class="button-link rhbp-preset-button" data-preset="content-only">' . esc_html__('Nur Inhalte + Uploads', 'rh-sync') . '</button>';
-        echo '<button type="button" class="button-link rhbp-preset-button" data-preset="db-only">' . esc_html__('Nur DB, keine Dateien', 'rh-sync') . '</button>';
+        echo '<div class="rhbp-presets">';
+        echo '<span class="rhbp-presets__label">' . esc_html__('Schnellwahl:', 'rh-sync') . '</span>';
+        echo '<button type="button" class="rhbp-linkbtn" data-preset="all">' . esc_html__('Alles', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-linkbtn" data-preset="no-users">' . esc_html__('Ohne Benutzer', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-linkbtn" data-preset="content-only">' . esc_html__('Nur Inhalte + Medien', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-linkbtn" data-preset="db-only">' . esc_html__('Nur DB, keine Dateien', 'rh-sync') . '</button>';
         echo '</div>';
 
-        echo '<div class="rhbp-profile-actions">';
-        echo '<button type="submit" class="button rhbp-profile-save">';
-        echo '<span class="dashicons dashicons-saved" aria-hidden="true"></span> ' . esc_html__('Profil speichern', 'rh-sync');
-        echo '</button>';
+        echo '<div class="rhbp-modal__pane-actions">';
+        echo '<button type="submit" class="rhbp-btn rhbp-btn--primary rhbp-profile-save">' . esc_html__('Profil speichern', 'rh-sync') . '</button>';
         echo '</div>';
 
         echo '</form>';
         echo '</div>';
     }
 
-    private function renderPermissionsSection(Peer $peer): void
+    private function renderPermsPane(Peer $peer): void
     {
         $p = $peer->permissions;
 
-        echo '<div class="rhbp-peer-card__permissions">';
-
-        echo '<div class="rhbp-profile__header">';
-        echo '<h4><span class="dashicons dashicons-lock" aria-hidden="true"></span> ' . esc_html__('Berechtigungen', 'rh-sync') . '</h4>';
-        echo '</div>';
-
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="rhbp-permissions-form">';
+        echo '<div class="rhbp-tabpane" data-rhbp-pane="perms">';
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         wp_nonce_field(self::NONCE_PERMISSIONS);
         echo '<input type="hidden" name="action" value="rhbp_peer_update_permissions" />';
         echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
 
-        echo '<p class="rhbp-perm-group-label">' . esc_html__('Was ich bei diesem Peer darf', 'rh-sync') . '</p>';
-        $this->renderPermCheckbox('allow_pull_from', __('Pull (von diesem Peer ziehen)', 'rh-sync'), $p->allowPullFrom);
-        $this->renderPermCheckbox('allow_push_to', __('Push (zu diesem Peer schieben)', 'rh-sync'), $p->allowPushTo);
+        echo '<p class="rhbp-pane-intro">' . esc_html__('Zwei Richtungen, getrennt geregelt. Oben was du auslöst, unten was die andere Site bei dir auslösen darf.', 'rh-sync') . '</p>';
 
-        echo '<p class="rhbp-perm-group-label">' . esc_html__('Was dieser Peer bei mir darf (server-seitig erzwungen)', 'rh-sync') . '</p>';
-        $this->renderPermCheckbox('allow_inbound_export', __('Export erlauben (Peer pullt von mir)', 'rh-sync'), $p->allowInboundExport);
-        $this->renderPermCheckbox('allow_inbound_import', __('Import erlauben (Peer pusht zu mir)', 'rh-sync'), $p->allowInboundImport);
+        // Outbound
+        echo '<div class="rhbp-fieldset">';
+        echo '<p class="rhbp-fieldset__title">' . $this->icon('arrow-right', 'sm') . ' ' . esc_html(sprintf(/* translators: %s: peer name */ __('Was ich bei %s darf', 'rh-sync'), $peer->name)) . '</p>';
+        echo '<p class="rhbp-fieldset__sub">' . esc_html__('Sichert dich gegen versehentliche Aktionen. Du kannst eine Richtung sperren.', 'rh-sync') . '</p>';
+        $this->renderCheckRow('allow_pull_from', sprintf(/* translators: %s: peer name */ __('Von %s ziehen (Pull)', 'rh-sync'), $peer->name), __('Daten von dort holen und hier einspielen.', 'rh-sync'), $p->allowPullFrom);
+        $this->renderCheckRow('allow_push_to', sprintf(/* translators: %s: peer name */ __('Zu %s schieben (Push)', 'rh-sync'), $peer->name), __('Daten von hier dorthin hochladen.', 'rh-sync'), $p->allowPushTo);
+        echo '</div>';
 
-        echo '<div class="rhbp-profile-actions">';
-        echo '<button type="submit" class="button">';
-        echo '<span class="dashicons dashicons-saved" aria-hidden="true"></span> ' . esc_html__('Berechtigungen speichern', 'rh-sync');
-        echo '</button>';
+        // Inbound
+        echo '<div class="rhbp-fieldset">';
+        echo '<p class="rhbp-fieldset__title">' . $this->icon('lock', 'sm') . ' ' . esc_html(sprintf(/* translators: %s: peer name */ __('Was %s bei mir darf', 'rh-sync'), $peer->name)) . '</p>';
+        echo '<p class="rhbp-fieldset__sub">' . esc_html__('Die echte Mauer: wird server-seitig erzwungen. Auf Produktion standardmäßig zu.', 'rh-sync') . '</p>';
+        $this->renderCheckRow('allow_inbound_export', __('Bei mir abholen erlauben', 'rh-sync'), sprintf(/* translators: %s: peer name */ __('%s darf Daten von dieser Site ziehen.', 'rh-sync'), $peer->name), $p->allowInboundExport);
+        $this->renderCheckRow('allow_inbound_import', __('Bei mir einspielen erlauben', 'rh-sync'), sprintf(/* translators: %s: peer name */ __('%s darf Daten in diese Site schreiben.', 'rh-sync'), $peer->name), $p->allowInboundImport);
+        if (\RhBlueprint\Core\Environment::isProduction()) {
+            echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:10px;">' . $this->icon('warning', 'sm') . '<span>' . esc_html__('Diese Site ist als Produktion erkannt, Inbound ist standardmäßig aus.', 'rh-sync') . '</span></div>';
+        }
+        echo '</div>';
+
+        echo '<div class="rhbp-modal__pane-actions">';
+        echo '<button type="submit" class="rhbp-btn rhbp-btn--primary">' . esc_html__('Berechtigungen speichern', 'rh-sync') . '</button>';
         echo '</div>';
 
         echo '</form>';
         echo '</div>';
     }
 
-    private function renderPermCheckbox(string $name, string $label, bool $checked): void
+    private function renderConnPane(Peer $peer): void
     {
-        printf(
-            '<label class="rhbp-perm-toggle"><input type="checkbox" name="%1$s" value="1" %2$s /> %3$s</label>',
-            esc_attr($name),
-            checked($checked, true, false),
-            esc_html($label)
-        );
+        echo '<div class="rhbp-tabpane" data-rhbp-pane="conn">';
+        echo '<p class="rhbp-pane-intro">' . esc_html__('Technische Details der Kopplung.', 'rh-sync') . '</p>';
+
+        echo '<dl class="rhbp-meta" style="grid-template-columns:auto 1fr; gap:10px 16px;">';
+        echo '<dt>' . esc_html__('Token', 'rh-sync') . '</dt><dd><code>' . esc_html($peer->maskedToken()) . '</code></dd>';
+        echo '<dt>' . esc_html__('Erstellt', 'rh-sync') . '</dt><dd>' . esc_html(wp_date('d.m.Y, H:i', $peer->createdAt)) . '</dd>';
+        echo '<dt>' . esc_html__('Verbindungs-ID', 'rh-sync') . '</dt><dd><code>' . esc_html($peer->id) . '</code></dd>';
+        echo '</dl>';
+
+        echo '<div class="rhbp-modal__pane-actions" style="justify-content:flex-start; gap:8px;">';
+
+        // Token neu erzeugen
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        wp_nonce_field(self::NONCE_REGEN);
+        echo '<input type="hidden" name="action" value="rhbp_peer_regenerate" />';
+        echo '<input type="hidden" name="peer_id" value="' . esc_attr($peer->id) . '" />';
+        echo '<button type="submit" class="rhbp-btn" onclick="return confirm(\'' . esc_js(__('Token neu erzeugen? Der alte Code wird ungültig, die Gegenseite muss neu gekoppelt werden.', 'rh-sync')) . '\')">' . $this->icon('refresh', 'sm') . ' ' . esc_html__('Token neu erzeugen', 'rh-sync') . '</button>';
+        echo '</form>';
+
+        echo '</div>';
+        echo '</div>';
+    }
+
+    private function renderCheckRow(string $name, string $label, string $desc, bool $checked): void
+    {
+        echo '<label class="rhbp-check-row">';
+        echo '<input type="checkbox" name="' . esc_attr($name) . '" value="1"' . checked($checked, true, false) . ' />';
+        echo '<span class="rhbp-check-row__text">';
+        echo '<span class="rhbp-check-row__label">' . esc_html($label) . '</span>';
+        echo '<span class="rhbp-check-row__desc">' . esc_html($desc) . '</span>';
+        echo '</span>';
+        echo '</label>';
     }
 
     private function renderHistory(): void
@@ -1009,7 +1187,7 @@ final class SyncPeersPage
 
         echo '<div class="rhbp-sync-history">';
         echo '<h3><span class="dashicons dashicons-backup" aria-hidden="true"></span> ' . esc_html__('Verlauf', 'rh-sync') . '</h3>';
-        echo '<table class="rhbp-db-table rhbp-history-table">';
+        echo '<table class="rhbp-table rhbp-history-table">';
         echo '<thead><tr>';
         echo '<th>' . esc_html__('Zeit', 'rh-sync') . '</th>';
         echo '<th>' . esc_html__('Peer', 'rh-sync') . '</th>';
@@ -1048,8 +1226,8 @@ final class SyncPeersPage
             echo '<tr class="rhbp-history-row" data-history-row="' . esc_attr($rowId) . '">';
             echo '<td>' . esc_html(wp_date('Y-m-d H:i', $timestamp)) . '</td>';
             echo '<td><strong>' . esc_html($peerName) . '</strong></td>';
-            echo '<td><span class="rhbp-history-direction rhbp-history-direction--' . esc_attr($direction) . '">' . esc_html($direction) . '</span></td>';
-            echo '<td><span class="rhbp-history-status rhbp-history-status--' . esc_attr($statusClass) . '">' . esc_html($status) . '</span></td>';
+            echo '<td><span class="rhbp-pill rhbp-pill--accent">' . esc_html($direction) . '</span></td>';
+            echo '<td><span class="rhbp-pill ' . ($statusClass === 'ok' ? 'rhbp-pill--ok' : 'rhbp-pill--err') . '">' . esc_html($status) . '</span></td>';
             echo '<td>' . esc_html($bytes > 0 ? (size_format($bytes, 2) ?: $bytes . ' B') : ', ') . '</td>';
             echo '<td>' . esc_html($durationMs > 0 ? $durationMs . ' ms' : ', ') . '</td>';
             echo '<td>' . esc_html($profileSummary !== '' ? $profileSummary : ', ') . '</td>';
@@ -1135,47 +1313,95 @@ final class SyncPeersPage
         echo '</div>';
     }
 
-    private function renderAddForm(): void
+    /**
+     * "Verbindung erzeugen": ich starte die Kopplung. Name + Adresse der Gegenseite,
+     * danach zeigt das Code-Modal meinen eigenen Pairing-Code zum Weitergeben.
+     */
+    private function renderCreateModal(): void
     {
-        echo '<div class="rhbp-sync-add">';
-        echo '<h3>' . esc_html__('Neuen Peer hinzufügen', 'rh-sync') . '</h3>';
-        echo '<p class="description">' . esc_html__('Ein Peer ist eine andere WordPress-Site, die das rh-blueprint Plugin aktiv hat. Beide Seiten müssen die gleiche UUID + Token haben, am einfachsten über einen Pairing-Code.', 'rh-sync') . '</p>';
+        echo '<div class="rhbp-modal-backdrop" id="rhbp-modal-create" data-rhbp-modal-backdrop>';
+        echo '<div class="rhbp-modal" role="dialog" aria-modal="true">';
 
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="rhbp-sync-add__form">';
+        echo '<div class="rhbp-modal__head">';
+        echo '<div class="rhbp-modal__head-l">';
+        echo '<span class="rhbp-modal__head-icon">' . $this->icon('plus') . '</span>';
+        echo '<div>';
+        echo '<h3 class="rhbp-modal__title">' . esc_html__('Verbindung erzeugen', 'rh-sync') . '</h3>';
+        echo '<p class="rhbp-modal__sub">' . esc_html__('Du startest die Kopplung und gibst der Gegenseite danach einen Code.', 'rh-sync') . '</p>';
+        echo '</div>';
+        echo '</div>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
+        echo '</div>';
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         wp_nonce_field(self::NONCE_ADD);
         echo '<input type="hidden" name="action" value="rhbp_peer_add" />';
 
-        echo '<div class="rhbp-sync-add__field rhbp-sync-add__field--full">';
-        echo '<label for="rhbp-peer-pairing">' . esc_html__('Pairing-Code (empfohlen)', 'rh-sync') . '</label>';
-        echo '<textarea id="rhbp-peer-pairing" name="peer_pairing" rows="3" placeholder="' . esc_attr__('Pairing-Code von der anderen Site einfuegen, Name und URL werden automatisch übernommen.', 'rh-sync') . '"></textarea>';
-        echo '<p class="description">' . esc_html__('Wurde auf der Gegenseite beim Anlegen des Peers angezeigt. Enthält UUID + Token + optional Name und URL.', 'rh-sync') . '</p>';
+        echo '<div class="rhbp-modal__body">';
+
+        echo '<div class="rhbp-field">';
+        echo '<label for="rhbp-create-name">' . esc_html__('Name der Gegenseite', 'rh-sync') . '</label>';
+        echo '<input type="text" id="rhbp-create-name" name="peer_name" placeholder="' . esc_attr__('z.B. stage, prod, live', 'rh-sync') . '" required />';
+        echo '<p class="rhbp-hint">' . esc_html__('Nur für dich, wie diese Verbindung in der Liste heißt.', 'rh-sync') . '</p>';
         echo '</div>';
 
-        echo '<div class="rhbp-sync-add__divider"><span>' . esc_html__('oder manuell', 'rh-sync') . '</span></div>';
-
-        echo '<div class="rhbp-sync-add__field">';
-        echo '<label for="rhbp-peer-name">' . esc_html__('Name', 'rh-sync') . '</label>';
-        echo '<input type="text" id="rhbp-peer-name" name="peer_name" placeholder="stage" />';
-        echo '<p class="description">' . esc_html__('Kurzer Bezeichner, z.B. "stage" oder "prod".', 'rh-sync') . '</p>';
+        echo '<div class="rhbp-field">';
+        echo '<label for="rhbp-create-url">' . esc_html__('Adresse der Gegenseite', 'rh-sync') . '</label>';
+        echo '<input type="url" id="rhbp-create-url" name="peer_url" placeholder="https://stage.example.com" required />';
+        echo '<p class="rhbp-hint">' . esc_html__('Wohin diese Site synchronisiert. Die Gegenseite bekommt deine Adresse automatisch über den Code, du musst dort nichts eintippen.', 'rh-sync') . '</p>';
         echo '</div>';
 
-        echo '<div class="rhbp-sync-add__field">';
-        echo '<label for="rhbp-peer-url">' . esc_html__('URL', 'rh-sync') . '</label>';
-        echo '<input type="url" id="rhbp-peer-url" name="peer_url" placeholder="https://stage.example.com" />';
-        echo '<p class="description">' . esc_html__('Basis-URL der Ziel-Instanz (ohne trailing slash).', 'rh-sync') . '</p>';
-        echo '</div>';
+        echo '</div>'; // body
 
-        echo '<div class="rhbp-sync-add__field">';
-        echo '<label for="rhbp-peer-token">' . esc_html__('Token (optional)', 'rh-sync') . '</label>';
-        echo '<input type="text" id="rhbp-peer-token" name="peer_token" placeholder="' . esc_attr__('Leer lassen für automatische Generierung', 'rh-sync') . '" />';
-        echo '<p class="description">' . esc_html__('Nur verwenden wenn du KEINEN Pairing-Code hast und das Token manuell matchen willst.', 'rh-sync') . '</p>';
-        echo '</div>';
-
-        echo '<div class="rhbp-sync-add__actions">';
-        echo '<button type="submit" class="button button-primary">' . esc_html__('Peer hinzufügen', 'rh-sync') . '</button>';
+        echo '<div class="rhbp-modal__foot">';
+        echo '<button type="button" class="rhbp-btn" data-rhbp-modal-close>' . esc_html__('Abbrechen', 'rh-sync') . '</button>';
+        echo '<button type="submit" class="rhbp-btn rhbp-btn--primary">' . esc_html__('Erzeugen und Code anzeigen', 'rh-sync') . '</button>';
         echo '</div>';
 
         echo '</form>';
+        echo '</div>';
+        echo '</div>';
+    }
+
+    /**
+     * "Code eingeben": die Gegenseite hat schon erzeugt. Name + Adresse kommen aus
+     * dem Code.
+     */
+    private function renderJoinModal(): void
+    {
+        echo '<div class="rhbp-modal-backdrop" id="rhbp-modal-join" data-rhbp-modal-backdrop>';
+        echo '<div class="rhbp-modal" role="dialog" aria-modal="true">';
+
+        echo '<div class="rhbp-modal__head">';
+        echo '<div class="rhbp-modal__head-l">';
+        echo '<span class="rhbp-modal__head-icon">' . $this->icon('inbox') . '</span>';
+        echo '<div>';
+        echo '<h3 class="rhbp-modal__title">' . esc_html__('Code eingeben', 'rh-sync') . '</h3>';
+        echo '<p class="rhbp-modal__sub">' . esc_html__('Den Code hat dir die andere Site beim Erzeugen angezeigt.', 'rh-sync') . '</p>';
+        echo '</div>';
+        echo '</div>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
+        echo '</div>';
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        wp_nonce_field(self::NONCE_ADD);
+        echo '<input type="hidden" name="action" value="rhbp_peer_add" />';
+
+        echo '<div class="rhbp-modal__body">';
+        echo '<div class="rhbp-field">';
+        echo '<label for="rhbp-join-code">' . esc_html__('Code von der anderen Site', 'rh-sync') . '</label>';
+        echo '<textarea id="rhbp-join-code" name="peer_pairing" rows="3" placeholder="' . esc_attr__('Code hier einfügen…', 'rh-sync') . '" required></textarea>';
+        echo '<p class="rhbp-hint">' . esc_html__('Name und Adresse der Gegenseite werden automatisch übernommen, du musst nichts weiter eintippen.', 'rh-sync') . '</p>';
+        echo '</div>';
+        echo '</div>';
+
+        echo '<div class="rhbp-modal__foot">';
+        echo '<button type="button" class="rhbp-btn" data-rhbp-modal-close>' . esc_html__('Abbrechen', 'rh-sync') . '</button>';
+        echo '<button type="submit" class="rhbp-btn rhbp-btn--primary">' . esc_html__('Verbinden', 'rh-sync') . '</button>';
+        echo '</div>';
+
+        echo '</form>';
+        echo '</div>';
         echo '</div>';
     }
 
@@ -1184,25 +1410,27 @@ final class SyncPeersPage
      */
     private function renderSyncModalTemplate(): void
     {
-        echo '<div class="rhbp-sync-modal" data-rhbp-modal hidden role="dialog" aria-modal="true" aria-labelledby="rhbp-modal-title">';
-        echo '<div class="rhbp-sync-modal__backdrop" data-modal-close></div>';
-        echo '<div class="rhbp-sync-modal__card">';
+        // Hülle generisch (Overlay + .rhbp-modal). Das Overlay traegt eine eigene,
+        // sync-spezifische Klasse, weil seine Sichtbarkeit über das hidden-Attribut
+        // läuft (das JS schützt vor Schließen während eines laufenden Syncs) und
+        // nicht über die generische .is-open-Mechanik.
+        echo '<div class="rhbp-sync-overlay" data-rhbp-modal hidden role="dialog" aria-modal="true" aria-labelledby="rhbp-modal-title">';
+        echo '<div class="rhbp-sync-overlay__backdrop" data-modal-close></div>';
+        echo '<div class="rhbp-modal rhbp-sync-overlay__card">';
 
         // Header
-        echo '<header class="rhbp-sync-modal__header">';
-        echo '<div class="rhbp-sync-modal__title-wrap">';
-        echo '<span class="rhbp-sync-modal__icon" data-modal-icon><span class="dashicons dashicons-download" aria-hidden="true"></span></span>';
+        echo '<div class="rhbp-modal__head">';
+        echo '<div class="rhbp-modal__head-l">';
+        echo '<span class="rhbp-modal__head-icon" data-modal-icon><span class="dashicons dashicons-download" aria-hidden="true"></span></span>';
         echo '<div>';
-        echo '<h2 id="rhbp-modal-title" data-modal-title>' . esc_html__('Sync vorbereiten', 'rh-sync') . '</h2>';
-        echo '<p class="rhbp-sync-modal__subtitle" data-modal-subtitle></p>';
+        echo '<h3 class="rhbp-modal__title" id="rhbp-modal-title" data-modal-title>' . esc_html__('Sync vorbereiten', 'rh-sync') . '</h3>';
+        echo '<p class="rhbp-modal__sub" data-modal-subtitle></p>';
         echo '</div>';
         echo '</div>';
-        echo '<button type="button" class="rhbp-sync-modal__close" data-modal-close aria-label="' . esc_attr__('Schliessen', 'rh-sync') . '">';
-        echo '<span class="dashicons dashicons-no-alt" aria-hidden="true"></span>';
-        echo '</button>';
-        echo '</header>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
+        echo '</div>';
 
-        // Body, verschiedene States via data-modal-state Attribut
+        // Body, verschiedene States via data-state Attribut
         echo '<div class="rhbp-sync-modal__body">';
 
         // Loading-State (Pre-Flight)
@@ -1313,15 +1541,15 @@ final class SyncPeersPage
         echo '</div>'; // body end
 
         // Footer
-        echo '<footer class="rhbp-sync-modal__footer" data-footer>';
-        echo '<button type="button" class="button" data-modal-close>' . esc_html__('Abbrechen', 'rh-sync') . '</button>';
-        echo '<button type="button" class="button button-primary" data-modal-confirm hidden>' . esc_html__('Sync starten', 'rh-sync') . '</button>';
-        echo '<button type="button" class="button" data-modal-retry hidden>' . esc_html__('Erneut versuchen', 'rh-sync') . '</button>';
-        echo '<button type="button" class="button button-primary" data-modal-finish hidden>' . esc_html__('Schließen', 'rh-sync') . '</button>';
-        echo '<button type="button" class="button button-primary" data-modal-login hidden disabled>' . esc_html__('Zur Anmeldung', 'rh-sync') . '</button>';
-        echo '</footer>';
+        echo '<div class="rhbp-modal__foot" data-footer>';
+        echo '<button type="button" class="rhbp-btn" data-modal-close>' . esc_html__('Abbrechen', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--primary" data-modal-confirm hidden>' . esc_html__('Sync starten', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-btn" data-modal-retry hidden>' . esc_html__('Erneut versuchen', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--primary" data-modal-finish hidden>' . esc_html__('Schließen', 'rh-sync') . '</button>';
+        echo '<button type="button" class="rhbp-btn rhbp-btn--primary" data-modal-login hidden disabled>' . esc_html__('Zur Anmeldung', 'rh-sync') . '</button>';
+        echo '</div>';
 
         echo '</div>'; // card end
-        echo '</div>'; // modal end
+        echo '</div>'; // overlay end
     }
 }
