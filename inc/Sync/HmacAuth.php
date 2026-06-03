@@ -20,6 +20,7 @@ final class HmacAuth
     public const CONTENT_HASH_HEADER = 'Content-SHA256';
     public const AUTH_PREFIX = 'RHBP-HMAC';
     public const MAX_TIMESTAMP_DRIFT = 300; // 5 Minuten
+    private const REPLAY_TRANSIENT_PREFIX = 'rhbp_sync_seen_';
 
     public function __construct(private readonly PeerRegistry $registry)
     {
@@ -117,7 +118,35 @@ final class HmacAuth
             }
         }
 
+        // Replay-Schutz: jede gültige Signatur darf nur EINMAL akzeptiert werden.
+        // Das Drift-Fenster allein lässt einen mitgeschnittenen Request bis zu 5 Min
+        // wiederholen. Wir merken gesehene Signaturen für die Fensterdauer.
+        if (!$this->markSignatureSeen($peerId, $signature)) {
+            return null;
+        }
+
         return $peer;
+    }
+
+    /**
+     * Speichert eine Signatur als "gesehen" und liefert false, wenn sie das schon war.
+     * Fail-open nur wenn die WP-Transient-API fehlt (CLI/Unit-Test ohne WP-Kontext).
+     */
+    private function markSignatureSeen(string $peerId, string $signature): bool
+    {
+        if (!function_exists('get_transient') || !function_exists('set_transient')) {
+            return true;
+        }
+
+        $key = self::REPLAY_TRANSIENT_PREFIX . hash('sha256', $peerId . '|' . $signature);
+
+        if (get_transient($key) !== false) {
+            return false;
+        }
+
+        set_transient($key, 1, self::MAX_TIMESTAMP_DRIFT + 10);
+
+        return true;
     }
 
     private function signatureBase(string $method, string $path, string $body, int $timestamp): string

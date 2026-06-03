@@ -7,6 +7,7 @@ namespace RhSync\Admin;
 use RhBlueprint\Core\Settings\SettingsPage;
 use RhSync\Sync\Peer;
 use RhSync\Sync\PeerRegistry;
+use RhSync\Sync\PeerUrl;
 use RhSync\Sync\PullOperation;
 use RhSync\Sync\PushOperation;
 use RhSync\Sync\SyncClient;
@@ -81,6 +82,8 @@ final class SyncPeersPage
             'push_forbidden' => ['error', __('Push zu diesem Peer ist lokal deaktiviert.', 'rh-sync')],
             'peer_missing_fields' => ['warning', __('Name und URL sind Pflicht.', 'rh-sync')],
             'peer_invalid_url' => ['error', __('Die URL ist nicht gültig.', 'rh-sync')],
+            'peer_insecure_url' => ['error', __('Peer-URLs müssen HTTPS verwenden. Über HTTP würden Sync-Daten im Klartext übertragen.', 'rh-sync')],
+            'peer_blocked_host' => ['error', __('Diese URL zeigt auf eine interne oder lokale Adresse und ist als Sync-Ziel nicht erlaubt.', 'rh-sync')],
             'peer_name_exists' => ['error', __('Ein Peer mit diesem Namen existiert bereits.', 'rh-sync')],
             'peer_not_found' => ['error', __('Peer nicht gefunden.', 'rh-sync')],
             'peer_invalid_pairing' => ['error', __('Pairing-Code ungültig oder beschädigt.', 'rh-sync')],
@@ -216,6 +219,12 @@ final class SyncPeersPage
 
         if (filter_var($url, FILTER_VALIDATE_URL) === false) {
             $this->redirect('peer_invalid_url');
+        }
+
+        // HTTPS-Zwang + SSRF-Schutz (in Produktion hart, in Dev per Environment-Default offen).
+        $urlError = PeerUrl::validate($url);
+        if ($urlError !== null) {
+            $this->redirect($urlError);
         }
 
         if ($this->registry->getByName($name) !== null) {
@@ -1125,6 +1134,7 @@ final class SyncPeersPage
         echo '<p class="rhbp-fieldset__sub">' . esc_html__('Die echte Mauer: wird server-seitig erzwungen. Auf Produktion standardmäßig zu.', 'rh-sync') . '</p>';
         $this->renderCheckRow('allow_inbound_export', __('Bei mir abholen erlauben', 'rh-sync'), sprintf(/* translators: %s: peer name */ __('%s darf Daten von dieser Site ziehen.', 'rh-sync'), $peer->name), $p->allowInboundExport);
         $this->renderCheckRow('allow_inbound_import', __('Bei mir einspielen erlauben', 'rh-sync'), sprintf(/* translators: %s: peer name */ __('%s darf Daten in diese Site schreiben.', 'rh-sync'), $peer->name), $p->allowInboundImport);
+        echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:10px;">' . $this->icon('warning', 'sm') . '<span>' . esc_html__('Einspielen erlauben heißt: diese Gegenseite kann deine Datenbank komplett überschreiben, inklusive der Benutzer und Admin-Zugänge. Nur für Peers aktivieren, denen du voll vertraust. Der Pairing-Code ist dabei der Schlüssel und gehört nur über sichere Kanäle weitergegeben.', 'rh-sync') . '</span></div>';
         if (\RhBlueprint\Core\Environment::isProduction()) {
             echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:10px;">' . $this->icon('warning', 'sm') . '<span>' . esc_html__('Diese Site ist als Produktion erkannt, Inbound ist standardmäßig aus.', 'rh-sync') . '</span></div>';
         }
