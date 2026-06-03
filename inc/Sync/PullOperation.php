@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace RhSync\Sync;
 
-use RhBackup\Api;
-use RhBlueprint\Core\Storage;
+use RhDbEngine\Exporter;
+use RhDbEngine\Importer;
+use RhDbEngine\Storage;
 
 /**
  * Pull-Workflow: Holt einen Remote-Snapshot vom Peer und importiert ihn lokal.
@@ -23,7 +24,8 @@ final class PullOperation
 {
     public function __construct(
         private readonly SyncClient $client,
-        private readonly Api $backup,
+        private readonly Exporter $exporter,
+        private readonly Importer $importer,
         private readonly Storage $storage,
         private readonly SyncLog $log,
     ) {
@@ -241,7 +243,7 @@ final class PullOperation
 
     private function createSafetyBackup(): string
     {
-        return $this->backup->createBackup(false, SyncDefaults::excludedTables());
+        return $this->exporter->createBackup(false, SyncDefaults::excludedTables());
     }
 
     private function runImport(string $zipPath, string $safetyBackup, SyncProfile $profile): void
@@ -252,11 +254,11 @@ final class PullOperation
         $snapshot = $guard->snapshot();
 
         try {
-            $this->backup->importFromFile($zipPath, $profile->tableFilter((string) $wpdb->prefix), $profile->uploads);
+            $this->importer->importFromFile($zipPath, $profile->tableFilter((string) $wpdb->prefix), $profile->uploads);
         } catch (\Throwable $e) {
             // Rollback-Versuch: Safety-Backup zurückspielen (Vollimport, kein Profile).
             try {
-                $this->backup->importFromFile($safetyBackup);
+                $this->importer->importFromFile($safetyBackup);
             } catch (\Throwable $rollbackError) {
                 throw new \RuntimeException(sprintf(
                     'Import fehlgeschlagen (%s) UND Rollback fehlgeschlagen (%s). Manuelle Wiederherstellung nötig: %s',

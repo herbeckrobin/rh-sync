@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace RhSync;
 
-use RhBackup\Api;
 use RhBlueprint\Core\Core;
 use RhBlueprint\Core\Settings\SettingsPage;
 use RhSync\Admin\SyncPeersPage;
@@ -19,10 +18,10 @@ use RhSync\Sync\SyncLog;
 /**
  * Bootstrap von rh-sync.
  *
- * Hängt am Core-Hook `rh-blueprint/core/booted` und zieht die Backup-API aus der
- * Service-Registry (für Export/Import) sowie die Core-Storage. Fehlt rh-backup,
- * deaktiviert sich rh-sync graceful (sollte durch `Requires Plugins: rh-backup`
- * ohnehin nicht vorkommen).
+ * Hängt am Core-Hook `rh-blueprint/core/booted` und nutzt die geteilte db-engine
+ * (`rh_db_engine()`) für Export/Import/Storage. rh-sync ist damit unabhängig von
+ * rh-backup, beide ziehen nur Core + db-engine. Fehlt die db-engine, deaktiviert
+ * sich rh-sync graceful.
  */
 final class Plugin
 {
@@ -35,36 +34,37 @@ final class Plugin
 
     public static function onCoreBooted(Core $core): void
     {
-        $backup = $core->services()->get('backup', 1);
-
-        if (! $backup instanceof Api) {
+        if (! function_exists('rh_db_engine')) {
             add_action('admin_notices', static function (): void {
-                echo '<div class="notice notice-error"><p><strong>RH Sync:</strong> Das Plugin rh-backup wird benötigt, ist aber nicht aktiv.</p></div>';
+                echo '<div class="notice notice-error"><p><strong>RH Sync:</strong> Die DB-Engine fehlt. Bitte das Plugin neu installieren (Composer-Dependencies).</p></div>';
             });
             return;
         }
 
-        $storage = $core->storage();
+        $engine = rh_db_engine();
+        $exporter = $engine->exporter();
+        $importer = $engine->importer();
+        $storage = $engine->storage();
 
         $peerRegistry = new PeerRegistry();
         $hmacAuth = new HmacAuth($peerRegistry);
         $syncClient = new SyncClient($hmacAuth);
         $syncLog = new SyncLog();
-        $pullOperation = new PullOperation($syncClient, $backup, $storage, $syncLog);
-        $pushOperation = new PushOperation($syncClient, $backup, $syncLog);
+        $pullOperation = new PullOperation($syncClient, $exporter, $importer, $storage, $syncLog);
+        $pushOperation = new PushOperation($syncClient, $exporter, $syncLog);
 
         $syncPeersPage = new SyncPeersPage($peerRegistry, $pullOperation, $pushOperation, $syncLog, $syncClient);
-        $syncController = new SyncController($hmacAuth, $backup, $storage, $peerRegistry);
+        $syncController = new SyncController($hmacAuth, $exporter, $importer, $storage, $peerRegistry);
 
-        $core->settings()->registerTab('sync_network', __('Sync Network', 'rh-sync'), 30);
+        $core->settings()->registerTab('sync', __('Sync', 'rh-sync'), 30);
         $syncPeersPage->boot();
         $syncController->boot();
 
         // Entkopplung: rh-sync steuert seinen Dashboard-Quick-Link selbst bei.
         add_filter('rh-blueprint/dashboard/quick_links', static function (array $links): array {
             $links[] = [
-                'label' => __('Sync Network', 'rh-sync'),
-                'url' => admin_url('options-general.php?page=' . SettingsPage::MENU_SLUG . '&tab=sync_network'),
+                'label' => __('Sync', 'rh-sync'),
+                'url' => admin_url('admin.php?page=' . SettingsPage::MENU_SLUG . '&tab=sync'),
                 'icon' => 'update',
             ];
             return $links;

@@ -17,7 +17,7 @@ use RhSync\Sync\SyncStatus;
 
 final class SyncPeersPage
 {
-    public const TAB_ID = 'sync_network';
+    public const TAB_ID = 'sync';
     public const CAPABILITY = 'manage_options';
     public const NONCE_ADD = 'rhbp_peer_add';
     public const NONCE_REMOVE = 'rhbp_peer_remove';
@@ -554,7 +554,7 @@ final class SyncPeersPage
             'page' => SettingsPage::MENU_SLUG,
             'tab' => self::TAB_ID,
             'rhbp_message' => $message,
-        ], admin_url('options-general.php')));
+        ], admin_url('admin.php')));
         exit;
     }
 

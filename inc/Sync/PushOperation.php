@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace RhSync\Sync;
 
-use RhBackup\Api;
+use RhDbEngine\Exporter;
 
 /**
  * Push-Workflow: Schiebt einen lokalen Snapshot zum Ziel-Peer und loest dort den Import aus.
@@ -21,7 +21,7 @@ final class PushOperation
 
     public function __construct(
         private readonly SyncClient $client,
-        private readonly Api $backup,
+        private readonly Exporter $exporter,
         private readonly SyncLog $log,
     ) {
     }
@@ -43,7 +43,7 @@ final class PushOperation
             // 1. Lokaler Export
             SyncStatus::beginStep($jobId, SyncStatus::PHASE_EXPORT, __('Erstelle lokalen Snapshot...', 'rh-sync'));
             $phaseStart = microtime(true);
-            $localZip = $this->backup->createBackup($effectiveProfile->uploads, SyncDefaults::excludedTables());
+            $localZip = $this->exporter->createBackup($effectiveProfile->uploads, SyncDefaults::excludedTables());
             $totalSize = (int) filesize($localZip);
             $phaseTimings['export'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::progress($jobId, 0, $totalSize);

@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace RhSync\Sync;
 
-use RhBackup\Api;
-use RhBlueprint\Core\Storage;
+use RhDbEngine\Exporter;
+use RhDbEngine\Importer;
+use RhDbEngine\Storage;
 use WP_Error;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -22,7 +23,8 @@ final class SyncController
 
     public function __construct(
         private readonly HmacAuth $auth,
-        private readonly Api $backup,
+        private readonly Exporter $exporter,
+        private readonly Importer $importer,
         private readonly Storage $storage,
         private readonly PeerRegistry $peers,
     ) {
@@ -182,7 +184,7 @@ final class SyncController
         $includeUploads = (bool) $request->get_param('include_uploads');
 
         try {
-            $zipPath = $this->backup->createBackup($includeUploads, SyncDefaults::excludedTables());
+            $zipPath = $this->exporter->createBackup($includeUploads, SyncDefaults::excludedTables());
         } catch (\Throwable $e) {
             return new WP_Error(
                 'rhbp_export_failed',
@@ -325,7 +327,7 @@ final class SyncController
         // Auto-Safety-Backup vor dem Import (mit gleichen Excluded-Tables wie Sync-Export)
         $safetyBackup = null;
         try {
-            $safetyBackup = $this->backup->createBackup(false, SyncDefaults::excludedTables());
+            $safetyBackup = $this->exporter->createBackup(false, SyncDefaults::excludedTables());
         } catch (\Throwable $e) {
             $this->cleanupSession($sessionId, $session);
             return new WP_Error('rhbp_safety_backup_failed', 'Safety-Backup fehlgeschlagen: ' . $e->getMessage(), ['status' => 500]);
@@ -338,11 +340,11 @@ final class SyncController
         global $wpdb;
 
         try {
-            $this->backup->importFromFile($assembledZip, $profile->tableFilter((string) $wpdb->prefix), $profile->uploads);
+            $this->importer->importFromFile($assembledZip, $profile->tableFilter((string) $wpdb->prefix), $profile->uploads);
         } catch (\Throwable $e) {
             // Rollback (Vollimport, kein Profile)
             try {
-                $this->backup->importFromFile($safetyBackup);
+                $this->importer->importFromFile($safetyBackup);
             } catch (\Throwable $rollbackError) {
                 $this->cleanupSession($sessionId, $session);
                 return new WP_Error(
