@@ -5,16 +5,20 @@ declare(strict_types=1);
 namespace RhSync\Admin;
 
 use RhBlueprint\Core\Settings\SettingsPage;
+use RhSync\Sync\JobState;
 use RhSync\Sync\Peer;
 use RhSync\Sync\PeerRegistry;
 use RhSync\Sync\PeerUrl;
+use RhSync\Sync\Preflight;
 use RhSync\Sync\PullOperation;
 use RhSync\Sync\PushOperation;
+use RhSync\Sync\SessionGuard;
 use RhSync\Sync\SyncClient;
 use RhSync\Sync\SyncLog;
 use RhSync\Sync\SyncPermissions;
 use RhSync\Sync\SyncProfile;
 use RhSync\Sync\SyncStatus;
+use RhSync\Sync\TickRunner;
 
 final class SyncPeersPage
 {
@@ -38,6 +42,7 @@ final class SyncPeersPage
         private readonly PushOperation $pushOperation,
         private readonly SyncLog $log,
         private readonly SyncClient $client,
+        private readonly TickRunner $ticker,
     ) {
     }
 
@@ -59,6 +64,7 @@ final class SyncPeersPage
         add_action('wp_ajax_rhbp_peer_push_async', [$this, 'ajaxPushAsync']);
         add_action('wp_ajax_rhbp_sync_status', [$this, 'ajaxSyncStatus']);
         add_action('wp_ajax_rhbp_sync_clear', [$this, 'ajaxSyncClear']);
+        add_action('wp_ajax_rhbp_sync_active_job', [$this, 'ajaxActiveJob']);
     }
 
     public function renderInlineMessage(string $tabId): void
@@ -433,6 +439,11 @@ final class SyncPeersPage
 
             $manifest = $response->json() ?? [];
 
+            // Erwartete Datenmenge + Platz-/Limit-Bewertung für die Vorab-Warnung in der UI.
+            $dbSize = (int) ($manifest['db_size'] ?? 0);
+            $uploadsSize = (int) ($manifest['uploads_size'] ?? 0);
+            $expectedBytes = $dbSize + ($peer->profile->uploads ? $uploadsSize : 0);
+
             wp_send_json_success([
                 'manifest' => $manifest,
                 'peer' => [
@@ -442,6 +453,13 @@ final class SyncPeersPage
                 ],
                 'profile' => $peer->profile->toArray(),
                 'profile_summary' => $this->profileSummary($peer->profile),
+                'preflight' => [
+                    'expected_bytes' => $expectedBytes,
+                    'estimate_seconds' => Preflight::estimateSeconds($expectedBytes),
+                    'local_disk' => Preflight::assessLocalDisk($expectedBytes),
+                    'local_limits' => Preflight::localLimits(),
+                    'remote_limits' => $manifest['limits'] ?? null,
+                ],
             ]);
         } catch (\Throwable $e) {
             wp_send_json_error(['message' => $e->getMessage()], 500);
@@ -456,16 +474,29 @@ final class SyncPeersPage
         $this->checkAjax();
         $peer = $this->resolvePeerFromAjax();
 
-        $jobId = SyncStatus::start($peer->id, SyncStatus::DIRECTION_PULL, $peer->profile);
+        $job = JobState::create($peer->id, SyncStatus::DIRECTION_PULL, $peer->profile);
 
-        // Sofort Response senden, Connection schließen, dann Operation ausfuehren
-        $this->respondAndDetach(['job_id' => $jobId]);
+        // Bei users-Pull die eigene Admin-Session sichern (jetzt, im eingeloggten Kontext),
+        // damit der spätere users-Import sie nicht aushebelt. Restore passiert im Import-Tick.
+        if ($peer->profile->users) {
+            $snapshot = (new SessionGuard())->snapshot();
+            if ($snapshot !== null) {
+                $cursor = $job->cursor;
+                $cursor['session_guard'] = $snapshot;
+                $job->cursor = $cursor;
+                $job->save();
+            }
+        }
 
+        // Sofort Response senden, Connection schließen, dann ersten Tick anstoßen.
+        $this->respondAndDetach(['job_id' => $job->jobId]);
+
+        // Bootstrap-Tick synchron im abgekoppelten Prozess; danach trägt die Loopback-Kette
+        // (Cron-Watchdog als Fallback, falls der Loopback blockiert ist).
         try {
-            $this->pullOperation->execute($peer, $peer->profile, $jobId);
+            $this->ticker->runTick($job->jobId, $job->spawnToken);
         } catch (\Throwable $e) {
-            // execute() faengt eigentlich alles und schreibt es in SyncStatus, aber zur Sicherheit:
-            SyncStatus::failed($jobId, $e->getMessage());
+            $job->finishFailure($e->getMessage());
         }
 
         exit;
@@ -479,14 +510,15 @@ final class SyncPeersPage
         $this->checkAjax();
         $peer = $this->resolvePeerFromAjax();
 
-        $jobId = SyncStatus::start($peer->id, SyncStatus::DIRECTION_PUSH, $peer->profile);
+        $job = JobState::create($peer->id, SyncStatus::DIRECTION_PUSH, $peer->profile);
 
-        $this->respondAndDetach(['job_id' => $jobId]);
+        $this->respondAndDetach(['job_id' => $job->jobId]);
 
+        // Bootstrap-Tick synchron im abgekoppelten Prozess; danach trägt die Loopback-Kette.
         try {
-            $this->pushOperation->execute($peer, $peer->profile, $jobId);
+            $this->ticker->runTick($job->jobId, $job->spawnToken);
         } catch (\Throwable $e) {
-            SyncStatus::failed($jobId, $e->getMessage());
+            $job->finishFailure($e->getMessage());
         }
 
         exit;
@@ -507,6 +539,16 @@ final class SyncPeersPage
 
         $status = SyncStatus::get($jobId);
         if ($status === null) {
+            // Der Polling-Transient kann durch einen Object-Cache-Flush verschwinden, der
+            // persistente JobState überlebt. In dem Fall aus dem JobState neu projizieren.
+            $job = JobState::load($jobId);
+            if ($job !== null) {
+                $job->project();
+                $status = SyncStatus::get($jobId);
+            }
+        }
+
+        if ($status === null) {
             wp_send_json_error(['message' => __('Job nicht gefunden oder abgelaufen.', 'rh-sync')], 404);
         }
 
@@ -514,7 +556,9 @@ final class SyncPeersPage
     }
 
     /**
-     * Status nach Anzeige aufraeumen (auf "Schließen" im Modal).
+     * Status nach Anzeige aufraeumen (auf "Schließen"/"Neustart" im Modal). Räumt den
+     * persistenten JobState vollständig ab (Option + Lock + Index + Transient), sodass der
+     * Peer wieder frei für einen neuen Sync ist.
      */
     public function ajaxSyncClear(): void
     {
@@ -523,10 +567,56 @@ final class SyncPeersPage
         // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce wird in dieser Methode via checkAjax() geprüft.
         $jobId = isset($_POST['job_id']) ? sanitize_text_field(wp_unslash($_POST['job_id'])) : '';
         if ($jobId !== '' && preg_match('/^[a-f0-9]{32}$/', $jobId)) {
-            SyncStatus::clear($jobId);
+            $job = JobState::load($jobId);
+            if ($job !== null) {
+                $job->purge();
+            } else {
+                // Fallback: nur Transient/Lock (Job-Option bereits weg).
+                SyncStatus::clear($jobId);
+            }
         }
 
         wp_send_json_success();
+    }
+
+    /**
+     * Liefert den aktuell laufenden Job eines Peers (für Modal-Rehydrierung beim Betreten
+     * des Tabs und für den globalen Fortschritts-Indikator). Liefert success=false, wenn keiner läuft.
+     */
+    public function ajaxActiveJob(): void
+    {
+        $this->checkAjax();
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce via checkAjax() geprüft.
+        $peerId = isset($_GET['peer_id']) ? sanitize_text_field(wp_unslash($_GET['peer_id'])) : '';
+
+        $job = $peerId !== '' ? JobState::forPeer($peerId) : $this->firstActiveJob();
+        if ($job === null) {
+            wp_send_json_success(['active' => false]);
+        }
+
+        $job->project();
+        $status = SyncStatus::get($job->jobId);
+        wp_send_json_success([
+            'active' => true,
+            'job_id' => $job->jobId,
+            'peer_id' => $job->peerId,
+            'status' => $status,
+        ]);
+    }
+
+    /**
+     * Erster laufender Job über alle Peers (für den admin-weiten Indikator).
+     */
+    private function firstActiveJob(): ?JobState
+    {
+        foreach (JobState::index() as $jobId => $peerId) {
+            $job = JobState::load($jobId);
+            if ($job !== null && !$job->isFinished()) {
+                return $job;
+            }
+        }
+        return null;
     }
 
     // ============================================================

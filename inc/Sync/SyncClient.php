@@ -16,6 +16,13 @@ final class SyncClient
     public const DEFAULT_TIMEOUT = 60;
     public const DOWNLOAD_TIMEOUT = 600;
 
+    /**
+     * Timeout für Calls, die auf der Gegenseite synchron eine lange Operation
+     * auslösen (Export-ZIP bauen, Import einspielen). Diese dauern bei großen
+     * Datenmengen leicht über das DEFAULT_TIMEOUT von 60s hinaus.
+     */
+    public const OPERATION_TIMEOUT = 600;
+
     public function __construct(private readonly HmacAuth $auth)
     {
     }
@@ -23,12 +30,12 @@ final class SyncClient
     /**
      * @param array<string, mixed>|null $bodyData
      */
-    public function request(Peer $peer, string $method, string $route, ?array $bodyData = null): SyncResponse
+    public function request(Peer $peer, string $method, string $route, ?array $bodyData = null, int $timeout = self::DEFAULT_TIMEOUT): SyncResponse
     {
         $body = $bodyData !== null ? (string) wp_json_encode($bodyData) : '';
         $contentType = $bodyData !== null ? 'application/json' : null;
 
-        return $this->requestRaw($peer, $method, $route, $body, $contentType);
+        return $this->requestRaw($peer, $method, $route, $body, $contentType, $timeout);
     }
 
     /**
@@ -127,6 +134,7 @@ final class SyncClient
      */
     private function downloadWithProgress(string $url, string $destination, ?Peer $peer, callable $onProgress): int
     {
+        // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fclose, WordPress.WP.AlternativeFunctions.curl_curl_init, WordPress.WP.AlternativeFunctions.curl_curl_setopt, WordPress.WP.AlternativeFunctions.curl_curl_exec, WordPress.WP.AlternativeFunctions.curl_curl_getinfo, WordPress.WP.AlternativeFunctions.curl_curl_error -- cURL für Fortschrittsanzeige beim Download, wp_remote_get bietet keinen Progress-Callback, und Streaming großer Dateien (WP_Filesystem lädt komplett in den RAM).
         $fp = fopen($destination, 'wb');
         if ($fp === false) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
@@ -160,17 +168,16 @@ final class SyncClient
 
         unset($ch);
         fclose($fp);
+        // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fclose, WordPress.WP.AlternativeFunctions.curl_curl_init, WordPress.WP.AlternativeFunctions.curl_curl_setopt, WordPress.WP.AlternativeFunctions.curl_curl_exec, WordPress.WP.AlternativeFunctions.curl_curl_getinfo, WordPress.WP.AlternativeFunctions.curl_curl_error
 
         if ($ok === false) {
-            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer unvollständigen Download-Datei, ein Fehlschlag ist unkritisch.
-            @unlink($destination);
+            wp_delete_file($destination);
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException('Download fehlgeschlagen: ' . $error);
         }
 
         if ($status !== 200) {
-            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer unvollständigen Download-Datei, ein Fehlschlag ist unkritisch.
-            @unlink($destination);
+            wp_delete_file($destination);
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
             throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status);
         }

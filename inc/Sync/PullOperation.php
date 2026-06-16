@@ -20,15 +20,122 @@ use RhDbEngine\Storage;
  *
  * Bei Fehlern nach Step 4: Rollback via Importer auf den Safety-Backup.
  */
-final class PullOperation
+final class PullOperation implements StageAdvancer
 {
+    private readonly ImportJobAdvancer $importMachine;
+
     public function __construct(
         private readonly SyncClient $client,
         private readonly Exporter $exporter,
         private readonly Importer $importer,
         private readonly Storage $storage,
         private readonly SyncLog $log,
+        private readonly PeerRegistry $peers,
     ) {
+        $this->importMachine = new ImportJobAdvancer($importer, $exporter, $storage);
+    }
+
+    /**
+     * Tick-getriebener Pull (neuer Pfad über die Tick-Engine).
+     *
+     * Stages: manifest -> export -> download (je ein Tick, Remote-HMAC-Calls), danach übernimmt
+     * die geteilte {@see ImportJobAdvancer}-Maschine (safety -> import -> ggf. rollback), sobald
+     * der Snapshot lokal als `cursor['ij_zip']` vorliegt.
+     *
+     * Hinweis: Remote-Export und Download laufen aktuell je in einem Tick (durch OPERATION_TIMEOUT
+     * bzw. Streaming geschützt). Range-Resume des Downloads und ein Remote-Export-Tick-Job sind
+     * die nächste Ausbaustufe für sehr große Quell-Datenmengen.
+     */
+    public function advance(JobState $job): void
+    {
+        // Snapshot liegt lokal: ab hier fährt die geteilte Import-Maschine.
+        if (isset($job->cursor['ij_zip'])) {
+            $this->importMachine->advance($job);
+            return;
+        }
+
+        $peer = $this->peers->get($job->peerId);
+        if ($peer === null) {
+            $job->finishFailure(__('Peer nicht gefunden.', 'rh-sync'), $job->stage);
+            return;
+        }
+
+        $profile = SyncProfile::fromArray($job->profile);
+
+        match ($job->stage) {
+            SyncStatus::PHASE_MANIFEST => $this->stageManifest($job, $peer),
+            SyncStatus::PHASE_EXPORT => $this->stageExport($job, $peer, $profile),
+            SyncStatus::PHASE_DOWNLOAD => $this->stageDownload($job, $peer),
+            default => $job->finishFailure('Unerwartete Pull-Stage: ' . $job->stage, $job->stage),
+        };
+    }
+
+    private function stageManifest(JobState $job, Peer $peer): void
+    {
+        $job->markStarted();
+        $job->beginStep(SyncStatus::PHASE_MANIFEST, __('Verbindung zur Quelle prüfen...', 'rh-sync'));
+
+        $manifest = $this->fetchManifest($peer);
+
+        $job->cursor['source_manifest'] = $manifest;
+        $job->completeStep(SyncStatus::PHASE_MANIFEST, sprintf(
+            /* translators: %1$s = WordPress-Version, %2$s = Plugin-Version */
+            __('Quelle erreichbar: WP %1$s, Plugin %2$s', 'rh-sync'),
+            (string) ($manifest['wp_version'] ?? '?'),
+            (string) ($manifest['plugin_version'] ?? '?')
+        ));
+        $job->stage = SyncStatus::PHASE_EXPORT;
+        $job->beginStep(SyncStatus::PHASE_EXPORT, __('Snapshot auf Quelle erstellen...', 'rh-sync'));
+        $job->save();
+    }
+
+    private function stageExport(JobState $job, Peer $peer, SyncProfile $profile): void
+    {
+        $exportInfo = $this->triggerExport($peer, $profile);
+        $size = (int) ($exportInfo['size'] ?? 0);
+
+        $job->cursor['download_url'] = (string) $exportInfo['download_url'];
+        $job->cursor['download_size'] = $size;
+        $job->setProgress(0, $size);
+        $job->completeStep(SyncStatus::PHASE_EXPORT, sprintf(
+            /* translators: %s = Datenmenge */
+            __('Snapshot bereit (%s)', 'rh-sync'),
+            size_format($size)
+        ));
+        $job->stage = SyncStatus::PHASE_DOWNLOAD;
+        $job->beginStep(SyncStatus::PHASE_DOWNLOAD, __('Lade Daten...', 'rh-sync'));
+        $job->save();
+    }
+
+    private function stageDownload(JobState $job, Peer $peer): void
+    {
+        $url = (string) ($job->cursor['download_url'] ?? '');
+        $size = (int) ($job->cursor['download_size'] ?? 0);
+        if ($url === '') {
+            $job->finishFailure(__('Kein Download-Link von der Quelle erhalten.', 'rh-sync'), SyncStatus::PHASE_DOWNLOAD);
+            return;
+        }
+
+        $this->storage->ensureReady();
+        $target = $this->storage->reserveTempFile('sync-pull') . '.zip';
+        $this->client->downloadTo($url, $target, $peer);
+
+        if (!is_file($target) || filesize($target) === 0) {
+            $job->finishFailure(__('Heruntergeladene Datei ist leer oder fehlt.', 'rh-sync'), SyncStatus::PHASE_DOWNLOAD);
+            return;
+        }
+
+        $job->setProgress($size, $size);
+        $job->completeStep(SyncStatus::PHASE_DOWNLOAD, sprintf(
+            /* translators: %s = Datenmenge */
+            __('%s heruntergeladen', 'rh-sync'),
+            size_format($size)
+        ));
+
+        // Übergabe an die Import-Maschine: ZIP-Pfad setzen, Sub-Phase initialisieren.
+        $job->cursor['ij_zip'] = $target;
+        $job->cursor['ij_phase'] = '';
+        $job->save();
     }
 
     public function execute(Peer $peer, ?SyncProfile $profile = null, ?string $jobId = null): PullResult
@@ -104,8 +211,7 @@ final class PullOperation
             $phaseTimings['import'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::completeStep($jobId, SyncStatus::PHASE_IMPORT, __('Import abgeschlossen', 'rh-sync'));
 
-            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer temporären Download-Datei, ein Fehlschlag ist unkritisch.
-            @unlink($localZip);
+            wp_delete_file($localZip);
 
             $bytes = $totalSize;
             $durationMs = (int) ((microtime(true) - $startTime) * 1000);
@@ -201,7 +307,7 @@ final class PullOperation
     {
         $response = $this->client->request($peer, 'POST', '/rhbp/v1/sync/export', [
             'include_uploads' => $profile->uploads,
-        ]);
+        ], SyncClient::OPERATION_TIMEOUT);
 
         if (!$response->isSuccess()) {
             // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer (renderPullResultNotice) via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.

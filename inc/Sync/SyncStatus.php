@@ -36,6 +36,8 @@ final class SyncStatus
 
     public const DIRECTION_PULL = 'pull';
     public const DIRECTION_PUSH = 'push';
+    // Reiner Inbound-Import auf der Ziel-Seite eines Push (eigener Tick-Job auf dem Peer).
+    public const DIRECTION_IMPORT = 'import';
 
     public const PHASE_PREFLIGHT = 'preflight';
     public const PHASE_MANIFEST = 'manifest';
@@ -75,6 +77,31 @@ final class SyncStatus
             ['id' => self::PHASE_UPLOAD, 'label' => __('Daten hochladen', 'rh-sync')],
             ['id' => self::PHASE_IMPORT, 'label' => __('Ziel-Site spielt Daten ein', 'rh-sync')],
         ];
+    }
+
+    /**
+     * Schritte für einen reinen Inbound-Import (Ziel-Seite eines Push).
+     *
+     * @return array<int, array{id: string, label: string}>
+     */
+    public static function importSteps(): array
+    {
+        return [
+            ['id' => self::PHASE_SAFETY, 'label' => __('Sicherheits-Backup', 'rh-sync')],
+            ['id' => self::PHASE_IMPORT, 'label' => __('Daten einspielen', 'rh-sync')],
+        ];
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string}>
+     */
+    public static function stepsForDirection(string $direction): array
+    {
+        return match ($direction) {
+            self::DIRECTION_PUSH => self::pushSteps(),
+            self::DIRECTION_IMPORT => self::importSteps(),
+            default => self::pullSteps(),
+        };
     }
 
     /**
@@ -254,6 +281,36 @@ final class SyncStatus
         if ($peerId !== '') {
             delete_transient(self::LOCK_PREFIX . $peerId);
         }
+    }
+
+    /**
+     * Projiziert den schlanken Frontend-Status aus einem {@see JobState} in den Polling-Transient.
+     *
+     * Der JobState (Option) ist die Wahrheit, der Transient nur die flüchtige Sicht fürs Frontend.
+     * Das Format entspricht 1:1 dem bisherigen Status, erweitert um `last_update_at` und `stale`
+     * (Stillstand-Erkennung), sodass das bestehende Polling-JS unverändert weiterläuft.
+     */
+    public static function project(JobState $job): void
+    {
+        $status = [
+            'job_id' => $job->jobId,
+            'peer_id' => $job->peerId,
+            'direction' => $job->direction,
+            'started_at' => $job->startedAt,
+            'ended_at' => $job->endedAt,
+            'last_update_at' => $job->lastUpdateAt,
+            'phase' => $job->stage,
+            'message' => $job->message,
+            'bytes_now' => $job->bytesNow,
+            'bytes_total' => $job->bytesTotal,
+            'profile' => $job->profile,
+            'steps' => $job->steps,
+            'summary' => $job->summary,
+            'error' => $job->error,
+            'stale' => $job->isStale(),
+        ];
+
+        set_transient(self::TRANSIENT_PREFIX . $job->jobId, $status, self::TTL);
     }
 
     /**

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace RhSync\Sync;
 
 use RhDbEngine\Exporter;
-use RhDbEngine\Importer;
 use RhDbEngine\Storage;
 use WP_Error;
 use WP_REST_Request;
@@ -24,9 +23,9 @@ final class SyncController
     public function __construct(
         private readonly HmacAuth $auth,
         private readonly Exporter $exporter,
-        private readonly Importer $importer,
         private readonly Storage $storage,
         private readonly PeerRegistry $peers,
+        private readonly JobScheduler $scheduler,
     ) {
     }
 
@@ -111,6 +110,46 @@ final class SyncController
                 ],
             ]
         );
+
+        // Status eines auf dieser Seite laufenden Remote-Import-Tick-Jobs (vom Push-Client gepollt).
+        register_rest_route(
+            self::NAMESPACE,
+            '/sync/import/job/(?P<remote_job_id>[a-f0-9]{32})/status',
+            [
+                'methods' => WP_REST_Server::READABLE,
+                'callback' => [$this, 'handleImportJobStatus'],
+                'permission_callback' => [$this, 'checkAuth'],
+                'args' => [
+                    'remote_job_id' => ['type' => 'string', 'required' => true],
+                ],
+            ]
+        );
+    }
+
+    public function handleImportJobStatus(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $jobId = (string) $request->get_param('remote_job_id');
+        $job = JobState::load($jobId);
+
+        if ($job === null) {
+            return new WP_Error('rhbp_job_not_found', __('Import-Job nicht gefunden.', 'rh-sync'), ['status' => 404]);
+        }
+
+        // Ein Peer darf nur den Import-Job pollen, den er selbst gestartet hat.
+        if ($job->peerId !== (string) $request->get_param('_peer_id')) {
+            return new WP_Error('rhbp_job_forbidden', __('Kein Zugriff auf diesen Import-Job.', 'rh-sync'), ['status' => 403]);
+        }
+
+        return new WP_REST_Response([
+            'phase' => $job->stage,
+            'message' => $job->message,
+            'bytes_now' => $job->bytesNow,
+            'bytes_total' => $job->bytesTotal,
+            'last_update_at' => $job->lastUpdateAt,
+            'stale' => $job->isStale(),
+            'error' => $job->error,
+            'summary' => $job->summary,
+        ]);
     }
 
     public function checkAuth(WP_REST_Request $request): bool|WP_Error
@@ -169,6 +208,7 @@ final class SyncController
             'post_count' => $postCount,
             'last_modified' => $lastModified,
             'capabilities' => $capabilities,
+            'limits' => Preflight::localLimits(),
             'generated_at' => gmdate('c'),
         ]);
     }
@@ -273,6 +313,7 @@ final class SyncController
         }
 
         $chunkFile = sprintf('%s/chunk-%06d.bin', $session['dir'], $index);
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Schreibt einen einzelnen Chunk eines großen Sync-Uploads, WP_Filesystem lädt komplette Dateien in den RAM und ist auf Shared Hosting untauglich.
         $written = file_put_contents($chunkFile, $body);
         if ($written === false) {
             return new WP_Error('rhbp_chunk_write', __('Chunk konnte nicht geschrieben werden.', 'rh-sync'), ['status' => 500]);
@@ -306,6 +347,7 @@ final class SyncController
         sort($chunks);
 
         $assembledZip = $session['dir'] . '/assembled.zip';
+        // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Streaming großer Sync-Dateien, WP_Filesystem lädt komplette Dateien in den RAM und ist auf Shared Hosting untauglich.
         $out = fopen($assembledZip, 'wb');
         if ($out === false) {
             $this->cleanupSession($sessionId, $session);
@@ -323,58 +365,36 @@ final class SyncController
             fclose($in);
         }
         fclose($out);
+        // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 
         $totalBytes = (int) filesize($assembledZip);
-        $startTime = microtime(true);
 
-        // Auto-Safety-Backup vor dem Import (mit gleichen Excluded-Tables wie Sync-Export)
-        $safetyBackup = null;
-        try {
-            $safetyBackup = $this->exporter->createBackup(false, SyncDefaults::excludedTables());
-        } catch (\Throwable $e) {
+        // Kein synchroner Import mehr: auf dieser Ziel-Seite einen eigenen Import-Tick-Job
+        // starten (das ist der 10-GB-Fix für Push). Das assemblierte ZIP an einen stabilen Ort
+        // verschieben (die Session wird gleich aufgeräumt), dann den Job über die Tick-Engine
+        // laufen lassen. Der Push-Client pollt /import/job/{id}/status.
+        $peerId = (string) $request->get_param('_peer_id');
+        $importJob = JobState::create($peerId, SyncStatus::DIRECTION_IMPORT, $profile);
+
+        $incomingDir = $this->storage->jobWorkdir('import-incoming-' . $importJob->jobId);
+        $incomingZip = trailingslashit($incomingDir) . 'incoming.zip';
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rename -- Verschieben innerhalb desselben Storage-Volumes, atomar; WP_Filesystem bietet kein atomares rename.
+        if (!@rename($assembledZip, $incomingZip)) {
+            $importJob->purge();
             $this->cleanupSession($sessionId, $session);
-            return new WP_Error('rhbp_safety_backup_failed', 'Safety-Backup fehlgeschlagen: ' . $e->getMessage(), ['status' => 500]);
+            return new WP_Error('rhbp_assemble_failed', __('Konnte Snapshot nicht bereitstellen.', 'rh-sync'), ['status' => 500]);
         }
 
-        // Site-spezifische rhbp_* Options (inkl. rhbp_peers!) vor dem Import sichern.
-        $guard = new LocalOptionGuard();
-        $snapshot = $guard->snapshot();
-
-        global $wpdb;
-
-        try {
-            $this->importer->importFromFile($assembledZip, $profile->tableFilter((string) $wpdb->prefix), $profile->uploads);
-        } catch (\Throwable $e) {
-            // Rollback (Vollimport, kein Profile)
-            try {
-                $this->importer->importFromFile($safetyBackup);
-            } catch (\Throwable $rollbackError) {
-                $this->cleanupSession($sessionId, $session);
-                return new WP_Error(
-                    'rhbp_import_and_rollback_failed',
-                    sprintf('Import fehlgeschlagen: %s. Rollback fehlgeschlagen: %s.', $e->getMessage(), $rollbackError->getMessage()),
-                    ['status' => 500]
-                );
-            }
-            $this->cleanupSession($sessionId, $session);
-            return new WP_Error(
-                'rhbp_import_failed',
-                'Import fehlgeschlagen, Safety-Backup wurde zurückgespielt: ' . $e->getMessage(),
-                ['status' => 500]
-            );
-        }
-
-        // Erfolg: lokale rhbp_* Options wiederherstellen.
-        $guard->restore($snapshot);
-
-        $durationMs = (int) ((microtime(true) - $startTime) * 1000);
+        $importJob->cursor = ['ij_zip' => $incomingZip];
+        $importJob->save();
 
         $this->cleanupSession($sessionId, $session);
+        $this->scheduler->spawnLoopback($importJob);
 
         return new WP_REST_Response([
-            'success' => true,
+            'remote_job_id' => $importJob->jobId,
+            'started' => true,
             'bytes' => $totalBytes,
-            'duration_ms' => $durationMs,
         ]);
     }
 
@@ -415,11 +435,10 @@ final class SyncController
         $files = glob($dir . '/*') ?: [];
         foreach ($files as $file) {
             if (is_file($file)) {
-                // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup einer temporären Session-Datei, ein Fehlschlag ist unkritisch.
-                @unlink($file);
+                wp_delete_file($file);
             }
         }
-        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Cleanup eines temporären Session-Verzeichnisses, ein Fehlschlag ist unkritisch.
+        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged,WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Cleanup eines temporären Session-Verzeichnisses, ein Fehlschlag ist unkritisch, WP_Filesystem ist hier unnoetiger Overhead.
         @rmdir($dir);
     }
 
@@ -453,11 +472,20 @@ final class SyncController
         // Token ist Single-Use
         delete_transient($transientKey);
 
+        // Aktive Output-Buffer leeren: sonst puffert PHP die komplette Datei in den
+        // Speicher bevor sie rausgeht und sprengt bei großen Backups das memory_limit.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- set_time_limit ist auf manchen Hosts (Safe-Mode/disable_functions) deaktiviert und löst dann eine Warnung aus, das Unterdrücken ist hier gewollt, der lange Download soll trotzdem laufen.
+        @set_time_limit(0);
+
         nocache_headers();
         header('Content-Type: application/zip');
         header('Content-Disposition: attachment; filename="' . basename($resolved) . '"');
         header('Content-Length: ' . (string) filesize($resolved));
 
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- Streaming großer Backup-Dateien, WP_Filesystem lädt komplette Dateien in den RAM und ist auf Shared Hosting untauglich.
         readfile($resolved);
         exit;
     }
