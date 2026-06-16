@@ -8,75 +8,75 @@ Stable tag: 0.3.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Datenbank und Uploads zwischen zwei WordPress-Instanzen abgleichen. Verschlüsselt per HMAC, mit feinen Berechtigungen pro Gegenstelle.
+Sync database and uploads between two WordPress instances. Encrypted via HMAC, with fine-grained permissions per peer.
 
 == Description ==
 
-RH Sync gleicht Inhalte zwischen zwei WordPress-Installationen ab, zum Beispiel zwischen lokaler Entwicklung, Staging und Produktion. Du koppelst zwei Instanzen einmal miteinander und ziehst (Pull) oder schiebst (Push) dann Datenbank und Uploads zwischen ihnen.
+RH Sync syncs content between two WordPress installations, for example between local development, staging and production. You pair two instances once, then pull or push database and uploads between them.
 
-Die Kopplung läuft direkt zwischen deinen Seiten über die WordPress-REST-API. Es gibt keinen zentralen Server und keinen Drittanbieter dazwischen. Jede Anfrage wird per HMAC-SHA256 signiert, läuft ausschließlich über HTTPS und ist gegen Replay- und SSRF-Angriffe abgesichert.
+The pairing runs directly between your sites over the WordPress REST API. There is no central server and no third party in between. Every request is signed with HMAC-SHA256, runs over HTTPS only and is protected against replay and SSRF attacks.
 
-= Was es kann =
+= Features =
 
-* Zwei WordPress-Instanzen koppeln, über einen Pairing-Code oder per manueller Eingabe
-* Pull und Push von Datenbank und Uploads zwischen den gekoppelten Seiten
-* Sync-Profile: pro Gegenstelle festlegen, welche Daten übertragen werden (Inhalte, Taxonomien, Kommentare, Benutzer, Optionen, eigene Tabellen, Uploads)
-* Berechtigungen pro Gegenstelle, getrennt für eingehend und ausgehend: was darf die Gegenstelle bei dir auslösen, was darfst du bei ihr
-* Sichere Voreinstellung: auf Produktions-Umgebungen ist eingehender Zugriff standardmäßig zu
+* Pair two WordPress instances, via a pairing code or manual entry
+* Pull and push database and uploads between the paired sites
+* Sync profiles: decide per peer which data is transferred (content, taxonomies, comments, users, options, custom tables, uploads)
+* Permissions per peer, separated for inbound and outbound: what the peer may trigger on your site, and what you may trigger on theirs
+* Safe defaults: on production environments inbound access is disabled by default
 
-= Sicherheit =
+= Security =
 
-* Jede Anfrage signiert per HMAC-SHA256, Verifizierung serverseitig
-* HTTPS-Zwang auf allen Endpunkten der Gegenstelle
-* Schutz gegen Replay-Angriffe und SSRF
-* Eingehende Berechtigungen werden serverseitig erzwungen, nicht nur in der Oberfläche
-* Jede Aktion im Backend ist durch Capability-Prüfung und Nonce abgesichert
+* Every request signed with HMAC-SHA256, verified server-side
+* HTTPS enforced on all peer endpoints
+* Protection against replay and SSRF attacks
+* Inbound permissions are enforced server-side, not only in the interface
+* Every admin action is guarded by a capability check and a nonce
 
-= Teil der rh-blueprint Kollektion =
+= Part of the rh-blueprint collection =
 
-RH Sync gehört zu einer Familie kleiner, fokussierter Plugins von Robin Herbeck. Es läuft eigenständig und braucht kein weiteres Modul. Mehrere Plugins der Kollektion teilen sich dieselbe Oberfläche und dasselbe Einstellungs-System.
+RH Sync belongs to a family of small, focused plugins by Robin Herbeck. It runs on its own and needs no other module. Several plugins in the collection share the same interface and settings system.
 
 == Installation ==
 
-1. Plugin auf beiden Seiten installieren, die du abgleichen willst.
-2. Aktivieren.
-3. Unter RH Blueprint -> Sync auf der ersten Seite eine Verbindung erzeugen, der Code enthält die Adresse der Seite.
-4. Auf der zweiten Seite den Code eingeben, um die Kopplung abzuschließen.
-5. Berechtigungen und Sync-Profil pro Gegenstelle einstellen, dann Pull oder Push starten.
+1. Install the plugin on both sites you want to sync.
+2. Activate it.
+3. On the first site, open RH Blueprint -> Sync and create a connection. The code carries the address of that site.
+4. On the second site, enter the code to complete the pairing.
+5. Set the permissions and sync profile per peer, then start a pull or push.
 
 == Frequently Asked Questions ==
 
-= Brauche ich einen externen Dienst? =
+= Do I need an external service? =
 
-Nein. RH Sync verbindet deine beiden Seiten direkt miteinander. Es gibt keinen zentralen Server und keinen Drittanbieter.
+No. RH Sync connects your two sites directly. There is no central server and no third party.
 
-= Ist die Übertragung sicher? =
+= Is the transfer secure? =
 
-Ja. Jede Anfrage ist per HMAC-SHA256 signiert, läuft über HTTPS und ist gegen Replay- und SSRF-Angriffe abgesichert. Eingehende Rechte werden serverseitig erzwungen.
+Yes. Every request is signed with HMAC-SHA256, runs over HTTPS and is protected against replay and SSRF attacks. Inbound rights are enforced server-side.
 
-= Kann eine gekoppelte Seite einfach alles bei mir überschreiben? =
+= Can a paired site simply overwrite everything on mine? =
 
-Nein. Du legst pro Gegenstelle getrennt fest, was eingehend und ausgehend erlaubt ist. Auf Produktions-Umgebungen ist eingehender Zugriff standardmäßig deaktiviert.
+No. You decide per peer, separately for inbound and outbound, what is allowed. On production environments inbound access is disabled by default.
 
-= Welche Daten werden übertragen? =
+= Which data is transferred? =
 
-Das bestimmst du über das Sync-Profil pro Gegenstelle: Inhalte, Taxonomien, Kommentare, Benutzer, Optionen, eigene Tabellen und Uploads lassen sich einzeln zuschalten.
+You control that through the sync profile per peer: content, taxonomies, comments, users, options, custom tables and uploads can be toggled individually.
 
-= Brauche ich RH Backup zusätzlich? =
+= Do I also need RH Backup? =
 
-Nein, RH Sync läuft eigenständig. RH Backup ist das Schwester-Plugin für lokale Sicherungen einer einzelnen Seite.
+No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
 
 = 0.3.2 =
-* Erste Veröffentlichung im WordPress-Plugin-Verzeichnis.
-* Peer-to-Peer Sync von Datenbank und Uploads zwischen zwei WordPress-Instanzen.
-* Kopplung über Pairing-Code oder manuelle Eingabe.
-* Sync-Profile und getrennte Berechtigungen pro Gegenstelle (eingehend/ausgehend).
-* Absicherung per HMAC-SHA256, HTTPS-Zwang sowie Replay- und SSRF-Schutz.
-* Aufgeräumte Oberfläche im nativen WordPress-Stil.
+* First release in the WordPress plugin directory.
+* Peer-to-peer sync of database and uploads between two WordPress instances.
+* Pairing via pairing code or manual entry.
+* Sync profiles and separate permissions per peer (inbound/outbound).
+* Secured with HMAC-SHA256, enforced HTTPS, plus replay and SSRF protection.
+* Clean interface in the native WordPress style.
 
 == Upgrade Notice ==
 
 = 0.3.2 =
-Erste Version im WordPress-Plugin-Verzeichnis.
+First release in the WordPress plugin directory.
