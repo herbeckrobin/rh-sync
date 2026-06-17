@@ -5,22 +5,25 @@ declare(strict_types=1);
 namespace RhSync\Sync;
 
 /**
- * Schuetzt site-spezifische Options beim Sync-Import.
+ * Schuetzt beim Sync-Import nur das, was den Sync selbst oder die Ziel-Site
+ * zerstoeren wuerde. ALLES andere (inkl. aller rhbp-Modul-Settings) wird gesynct.
  *
- * Problem: Der Exporter dumpt die komplette `wp_options` Table. Dort sind auch
- * Options drin, die pro Site unterschiedlich sein müssen und vom Sync nicht
- * überschrieben werden dürfen, sonst bricht der Ziel-Zustand (Peer-Liste
- * weg, Plugin-Aktivierung falsch, Login-URL ändert sich).
+ * Grundsatz (bewusst eng, nicht breit): Default ist "synct mit". Geschuetzt wird
+ * eine kleine, EXPLIZITE Liste, kein Catch-all-Muster. Ein breites `rhbp\_%` hat
+ * frueher alle Modul-Settings (rh-seo Stammdaten, Hardening-Schalter, ...) wieder
+ * revertiert, obwohl genau die gesynct werden sollten. Lieber zu wenig schuetzen
+ * (eine Site-Identitaets-Option vergessen faellt sofort auf) als zu viel (stilles
+ * Verschlucken gewollter Daten, schwer zu finden).
  *
- * Default geschuetzt:
- *   - `rhbp_*`, Alle Plugin-eigenen Options (Peers, Settings, Sync-Log)
- *   - `siteurl`, `home`, Site-Identitaet (Safety-Net falls Search-Replace fehlschlaegt)
- *   - `active_plugins`, `active_sitewide_plugins`, Plugin-Aktivierung
- *   - `cron`, Cron-Queue
- *   - `rewrite_rules`, Rewrite-Cache
- *   - `whl_page`, WPS Hide Login Slug (sonst Login-URL weg)
+ * Geschuetzt (bleibt ziel-lokal):
+ *   - Sync-Engine-Status: `rhbp_peers` (eigene Peer-Liste), `rhbp_sync_*`
+ *     (Log, Jobs, Locks) + die zugehoerigen Transients. Wuerde der Import die
+ *     ueberschreiben, clobbert er die laufende Sync-Operation und die Kopplung.
+ *   - WP-Core Site-Identitaet (siteurl/home/active_plugins/cron/...), die die
+ *     Ziel-Site brechen wuerde wenn sie auf den Quellzustand gesetzt wird.
  *
- * Erweiterbar via Filter:
+ * Erweiterbar via Filter, falls eine Site doch mehr schuetzen will (z.B. SMTP-
+ * Credentials die pro Umgebung verschluesselt sind):
  *   - `rh-blueprint/sync/preserved_option_patterns`, SQL-LIKE-Patterns
  *   - `rh-blueprint/sync/preserved_option_names`   , exakte option_names
  */
@@ -28,48 +31,36 @@ final class LocalOptionGuard
 {
     /** @var array<int, string> */
     private const DEFAULT_PATTERNS = [
-        // Plugin-eigene Options + deren Transients
-        'rhbp\\_%',
-        '\\_transient\\_rhbp\\_%',
-        '\\_site\\_transient\\_rhbp\\_%',
-        '\\_transient\\_timeout\\_rhbp\\_%',
-        '\\_site\\_transient\\_timeout\\_rhbp\\_%',
+        // Sync-Engine-Status der ZIEL-Site (Log, Jobs-Index, Job-States, Locks)
+        'rhbp\\_sync\\_%',
+        // Sync-Transients (Download-Cache, Import-Sessions)
+        '\\_transient\\_rhbp\\_sync\\_%',
+        '\\_transient\\_timeout\\_rhbp\\_sync\\_%',
+        '\\_site\\_transient\\_rhbp\\_sync\\_%',
+        '\\_site\\_transient\\_timeout\\_rhbp\\_sync\\_%',
         // WP-Core Update-Check Transients (pro Site zeitkritisch)
         '\\_site\\_transient\\_update\\_%',
         '\\_site\\_transient\\_timeout\\_update\\_%',
-        // Limit Login Attempts Reloaded, Lockouts und Blacklist sind site-lokal
-        'limit\\_login\\_%',
-        // WP Mail SMTP, Credentials, Auth-Tokens, Lizenz
-        'wp\\_mail\\_smtp%',
     ];
 
     /** @var array<int, string> */
     private const DEFAULT_NAMES = [
-        // WP Core, Site-Identitaet
+        // Sync-Kopplung: die eigene Peer-Liste der Ziel-Site, NICHT die der Quelle
+        'rhbp_peers',
+        // WP-Core Site-Identitaet, wuerde die Ziel-Site brechen wenn ueberschrieben
         'siteurl',
         'home',
         'admin_email',
         'new_admin_email',
-        // Plugin-Aktivierung (Fatal-Error-Schutz)
         'active_plugins',
         'active_sitewide_plugins',
-        // Cron + Rewrite pro Site
         'cron',
         'rewrite_rules',
-        // Hosting-Pfade für Uploads
         'upload_path',
         'upload_url_path',
-        // WP-Core SMTP-Fallback
-        'mailserver_url',
-        'mailserver_login',
-        'mailserver_pass',
-        'mailserver_port',
-        // DB-Schema-State
         'db_version',
         'db_upgraded',
         'fresh_site',
-        // WPS Hide Login, Login-URL-Slug
-        'whl_page',
     ];
 
     /**
