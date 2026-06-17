@@ -33,6 +33,16 @@ jobs:
       - name: Install production dependencies
         run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
 
+      - name: Fail on stale rh-dependency lock
+        run: |
+          OUT=$(composer update --dry-run "rh/*" --no-dev --no-interaction 2>&1) || true
+          echo "$OUT"
+          if echo "$OUT" | grep -qiE '(Upgrading|Downgrading|Updating) rh/'; then
+            echo "::error::Eine rh-Library im composer.lock ist veraltet. Lokal 'composer update \"rh/*\"' ausfuehren, committen, Version bumpen, neu taggen."
+            exit 1
+          fi
+          echo "rh-Dependencies aktuell."
+
       - name: Verify plugin version matches tag
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
