@@ -47,16 +47,16 @@
         },
         {
             "name": "rh/db-engine",
-            "version": "v1.1.2",
+            "version": "v1.1.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/herbeckrobin/rh-db-engine.git",
-                "reference": "348b0ba73386417430a93dcc651a4b9e1701ebda"
+                "reference": "991b2b6a5d05884a36a00991ce55c45d3ade9115"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/herbeckrobin/rh-db-engine/zipball/348b0ba73386417430a93dcc651a4b9e1701ebda",
-                "reference": "348b0ba73386417430a93dcc651a4b9e1701ebda",
+                "url": "https://api.github.com/repos/herbeckrobin/rh-db-engine/zipball/991b2b6a5d05884a36a00991ce55c45d3ade9115",
+                "reference": "991b2b6a5d05884a36a00991ce55c45d3ade9115",
                 "shasum": ""
             },
             "require": {
@@ -79,10 +79,10 @@
             ],
             "description": "Geteilte DB-Engine der rh-blueprint Kollektion: Storage, Export, Import, Search-Replace.",
             "support": {
-                "source": "https://github.com/herbeckrobin/rh-db-engine/tree/v1.1.2",
+                "source": "https://github.com/herbeckrobin/rh-db-engine/tree/v1.1.3",
                 "issues": "https://github.com/herbeckrobin/rh-db-engine/issues"
             },
-            "time": "2026-06-29T10:41:25+00:00"
+            "time": "2026-07-10T09:44:22+00:00"
         },
         {
             "name": "yahnis-elsts/plugin-update-checker",
