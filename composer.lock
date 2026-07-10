@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "rh/blueprint-core",
-            "version": "v2.4.1",
+            "version": "v2.5.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/herbeckrobin/rh-blueprint-core.git",
-                "reference": "cf8786180841c91142776349ede84bf07e7cd93a"
+                "reference": "0b1bb1dea508d3f23b6ecfa83c188c2981a38e5e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/herbeckrobin/rh-blueprint-core/zipball/cf8786180841c91142776349ede84bf07e7cd93a",
-                "reference": "cf8786180841c91142776349ede84bf07e7cd93a",
+                "url": "https://api.github.com/repos/herbeckrobin/rh-blueprint-core/zipball/0b1bb1dea508d3f23b6ecfa83c188c2981a38e5e",
+                "reference": "0b1bb1dea508d3f23b6ecfa83c188c2981a38e5e",
                 "shasum": ""
             },
             "require": {
@@ -40,10 +40,10 @@
             ],
             "description": "Geteilter Core fuer die rh-blueprint Plugin-Kollektion: Service-Registry, Settings-Framework, Shared Admin-UI, Environment-Helper.",
             "support": {
-                "source": "https://github.com/herbeckrobin/rh-blueprint-core/tree/v2.4.1",
+                "source": "https://github.com/herbeckrobin/rh-blueprint-core/tree/v2.5.1",
                 "issues": "https://github.com/herbeckrobin/rh-blueprint-core/issues"
             },
-            "time": "2026-06-17T10:46:22+00:00"
+            "time": "2026-06-18T08:50:08+00:00"
         },
         {
             "name": "rh/db-engine",

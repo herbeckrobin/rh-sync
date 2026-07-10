@@ -17,6 +17,13 @@ final class SyncClient
     public const DOWNLOAD_TIMEOUT = 600;
 
     /**
+     * Timeout für einen einzelnen Range-Chunk. Bewusst kurz: ein 8-MB-Chunk ist in
+     * Sekunden geladen, ein zu langer Timeout würde einen hängenden Chunk unnötig lange
+     * blockieren (die Chunk-Schleife resumt bei Abbruch eh ab dem letzten Offset).
+     */
+    public const CHUNK_TIMEOUT = 120;
+
+    /**
      * Timeout für Calls, die auf der Gegenseite synchron eine lange Operation
      * auslösen (Export-ZIP bauen, Import einspielen). Diese dauern bei großen
      * Datenmengen leicht über das DEFAULT_TIMEOUT von 60s hinaus.
@@ -125,6 +132,48 @@ final class SyncClient
         }
 
         return $status;
+    }
+
+    /**
+     * Streamt einen einzelnen HTTP-Range in $partFile (Byte-Bereich [$start, $start+$length-1]).
+     *
+     * Der Download-Endpoint ist token-authentifiziert (Query-Param), NICHT HMAC-signiert,
+     * darum ein direkter `wp_remote_get` (wie {@see downloadTo()}), erweitert um den Range-Header.
+     * Der Body wird per Streaming direkt in $partFile geschrieben (kein RAM-Buffer).
+     *
+     * @return array{status:int, bytes:int} status 206 (Teilstück, Normalfall) oder 200
+     *   (Quelle ohne Range-Support / Proxy ignoriert Range, dann enthält $partFile die VOLLE Datei).
+     * @throws \RuntimeException bei Transport-Fehler oder unerwartetem HTTP-Status.
+     */
+    public function downloadRange(string $url, ?Peer $peer, int $start, int $length, string $partFile): array
+    {
+        $end = $start + $length - 1;
+
+        $args = [
+            'timeout' => self::CHUNK_TIMEOUT,
+            'stream' => true,
+            'filename' => $partFile,
+            'headers' => ['Range' => 'bytes=' . $start . '-' . $end],
+            'sslverify' => apply_filters('rh-blueprint/sync/sslverify', true, $peer),
+        ];
+
+        $response = wp_remote_get($url, $args);
+
+        if (is_wp_error($response)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
+            throw new \RuntimeException('Download fehlgeschlagen: ' . $response->get_error_message());
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+
+        if ($status !== 206 && $status !== 200) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
+            throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status);
+        }
+
+        $bytes = is_file($partFile) ? (int) filesize($partFile) : 0;
+
+        return ['status' => $status, 'bytes' => $bytes];
     }
 
     /**

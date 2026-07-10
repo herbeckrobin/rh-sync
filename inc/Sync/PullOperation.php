@@ -22,6 +22,12 @@ use RhDbEngine\Storage;
  */
 final class PullOperation implements StageAdvancer
 {
+    /** Größe eines Download-Chunks. Klein genug, um sicher unter jedem Proxy-/FPM-Timeout zu bleiben. */
+    private const DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+
+    /** Aufeinanderfolgende Chunk-Fehlversuche, bevor der Download-Schritt endgültig scheitert. */
+    private const DOWNLOAD_MAX_RETRIES = 5;
+
     private readonly ImportJobAdvancer $importMachine;
 
     public function __construct(
@@ -38,13 +44,14 @@ final class PullOperation implements StageAdvancer
     /**
      * Tick-getriebener Pull (neuer Pfad über die Tick-Engine).
      *
-     * Stages: manifest -> export -> download (je ein Tick, Remote-HMAC-Calls), danach übernimmt
-     * die geteilte {@see ImportJobAdvancer}-Maschine (safety -> import -> ggf. rollback), sobald
-     * der Snapshot lokal als `cursor['ij_zip']` vorliegt.
+     * Stages: manifest -> export -> download, danach übernimmt die geteilte
+     * {@see ImportJobAdvancer}-Maschine (safety -> import -> ggf. rollback), sobald der Snapshot
+     * lokal als `cursor['ij_zip']` vorliegt.
      *
-     * Hinweis: Remote-Export und Download laufen aktuell je in einem Tick (durch OPERATION_TIMEOUT
-     * bzw. Streaming geschützt). Range-Resume des Downloads und ein Remote-Export-Tick-Job sind
-     * die nächste Ausbaustufe für sehr große Quell-Datenmengen.
+     * Der Download läuft resume-bar über viele Ticks: pro Tick werden mehrere Range-Chunks
+     * (je {@see DOWNLOAD_CHUNK_SIZE}) geladen, bis das Tick-Budget erschöpft ist. Der Byte-Offset
+     * lebt im Cursor (`download_offset`), sodass ein Verbindungsabbruch bei großen Uploads nur den
+     * laufenden Chunk kostet und der nächste Tick nahtlos weitermacht.
      */
     public function advance(JobState $job): void
     {
@@ -117,14 +124,167 @@ final class PullOperation implements StageAdvancer
         }
 
         $this->storage->ensureReady();
-        $target = $this->storage->reserveTempFile('sync-pull') . '.zip';
-        $this->client->downloadTo($url, $target, $peer);
 
-        if (!is_file($target) || filesize($target) === 0) {
-            $job->finishFailure(__('Heruntergeladene Datei ist leer oder fehlt.', 'rh-sync'), SyncStatus::PHASE_DOWNLOAD);
+        // Ziel-Datei EINMAL reservieren und im Cursor festhalten: reserveTempFile() erzeugt bei
+        // jedem Aufruf einen neuen Zufallsnamen, alle Folge-Ticks müssen aber dieselbe Datei
+        // fortschreiben, sonst wäre Resume unmöglich.
+        $target = (string) ($job->cursor['download_target'] ?? '');
+        if ($target === '') {
+            $target = $this->storage->reserveTempFile('sync-pull') . '.zip';
+            $job->cursor['download_target'] = $target;
+        }
+
+        // Größe unbekannt: kein Range möglich, klassischer Voll-Download in einem Zug.
+        if ($size <= 0) {
+            $this->client->downloadTo($url, $target, $peer);
+            if (!is_file($target) || filesize($target) === 0) {
+                $job->finishFailure(__('Heruntergeladene Datei ist leer oder fehlt.', 'rh-sync'), SyncStatus::PHASE_DOWNLOAD);
+                return;
+            }
+            $this->completeDownload($job, $target, (int) filesize($target));
             return;
         }
 
+        $chunkSize = max(1, (int) apply_filters('rh-blueprint/sync/download_chunk_size', self::DOWNLOAD_CHUNK_SIZE));
+        $offset = (int) ($job->cursor['download_offset'] ?? 0);
+        $retries = (int) ($job->cursor['download_retries'] ?? 0);
+        $deadline = microtime(true) + $job->tickBudget;
+
+        while ($offset < $size && microtime(true) < $deadline) {
+            $len = (int) min($chunkSize, $size - $offset);
+            $part = $target . '.part';
+
+            // Heartbeat VOR dem Chunk: der Watchdog wertet bis zu STALE_AFTER (90s) Ruhe pro
+            // Chunk als normal und greift nicht in einen aktiven Download ein.
+            $job->touch();
+
+            try {
+                $result = $this->client->downloadRange($url, $peer, $offset, $len, $part);
+            } catch (\Throwable $e) {
+                // Transienter Netzwerkfehler (cURL 18 etc.): partiellen Chunk verwerfen, ab dem
+                // letzten persistierten Offset weiter. Erst nach MAX_RETRIES endgültig aufgeben.
+                $this->deletePart($part);
+                if ($this->bumpRetry($job, ++$retries, $e->getMessage())) {
+                    return;
+                }
+                $job->save();
+                return; // nächster Loopback-Tick resumt ab $offset
+            }
+
+            // Alte Quelle ohne Range-Support (200 statt 206): $part hält die volle Datei.
+            if ($result['status'] === 200) {
+                if ($offset > 0) {
+                    $this->deletePart($part);
+                    $job->finishFailure(
+                        __('Die Quelle lieferte eine widersprüchliche Range-Antwort. Bitte Quelle und Ziel auf dieselbe Version aktualisieren.', 'rh-sync'),
+                        SyncStatus::PHASE_DOWNLOAD
+                    );
+                    return;
+                }
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rename -- atomares Verschieben einer lokalen Temp-Datei, WP_Filesystem wäre unnötiger Overhead.
+                rename($part, $target);
+                $job->cursor['download_no_range'] = true;
+                $offset = is_file($target) ? (int) filesize($target) : 0;
+                $job->cursor['download_offset'] = $offset;
+                break;
+            }
+
+            // Erwartet: 206 mit genau $len Bytes. Alles andere ist ein Fehlversuch.
+            if ($result['status'] !== 206 || $result['bytes'] !== $len) {
+                $this->deletePart($part);
+                if ($this->bumpRetry($job, ++$retries, __('inkonsistentes Teilstück', 'rh-sync'))) {
+                    return;
+                }
+                $job->save();
+                return;
+            }
+
+            if (!self::writeChunkAt($target, $offset, $part)) {
+                $this->deletePart($part);
+                $job->finishFailure(__('Download-Datei konnte nicht geschrieben werden.', 'rh-sync'), SyncStatus::PHASE_DOWNLOAD);
+                return;
+            }
+            $this->deletePart($part);
+
+            $offset += $result['bytes'];
+            $retries = 0;
+            $job->cursor['download_offset'] = $offset;
+            $job->cursor['download_retries'] = 0;
+            $job->setProgress($offset, $size);
+            $job->touch();
+        }
+
+        if ($offset >= $size) {
+            $this->completeDownload($job, $target, $size);
+            return;
+        }
+
+        // Budget erschöpft, aber noch nicht fertig: nächster Loopback-Tick macht weiter.
+        $job->save();
+    }
+
+    /**
+     * Erhöht den Retry-Zähler im Cursor. Gibt true zurück, wenn das Limit erreicht ist und
+     * der Job bereits als gescheitert abgeschlossen wurde (Aufrufer muss dann return).
+     */
+    private function bumpRetry(JobState $job, int $retries, string $reason): bool
+    {
+        $job->cursor['download_retries'] = $retries;
+        if ($retries >= self::DOWNLOAD_MAX_RETRIES) {
+            $job->finishFailure(
+                sprintf(
+                    /* translators: %s = Fehlergrund */
+                    __('Download nach mehreren Versuchen fehlgeschlagen: %s', 'rh-sync'),
+                    $reason
+                ),
+                SyncStatus::PHASE_DOWNLOAD
+            );
+            return true;
+        }
+        return false;
+    }
+
+    private function deletePart(string $part): void
+    {
+        if (is_file($part)) {
+            wp_delete_file($part);
+        }
+    }
+
+    /**
+     * Schreibt den Inhalt von $part byte-genau ab $offset in $target. Idempotent über
+     * fseek+ftruncate (nicht Append), damit ein etwaiger paralleler Revive-Tick dieselben
+     * Bytes an dieselbe Position schreibt statt hinten anzuhängen.
+     */
+    private static function writeChunkAt(string $target, int $offset, string $part): bool
+    {
+        // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- byte-genaues Resume-Schreiben großer Backup-Dateien; WP_Filesystem kann keinen Offset schreiben und lädt komplett in den RAM.
+        $in = fopen($part, 'rb');
+        if ($in === false) {
+            return false;
+        }
+        $out = fopen($target, $offset === 0 ? 'wb' : 'cb');
+        if ($out === false) {
+            fclose($in);
+            return false;
+        }
+        if (fseek($out, $offset) !== 0) {
+            fclose($in);
+            fclose($out);
+            return false;
+        }
+        $copied = stream_copy_to_stream($in, $out);
+        $partSize = (int) filesize($part);
+        ftruncate($out, $offset + $partSize);
+        fclose($in);
+        fclose($out);
+        // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+
+        return $copied !== false && (int) $copied === $partSize;
+    }
+
+    private function completeDownload(JobState $job, string $target, int $size): void
+    {
         $job->setProgress($size, $size);
         $job->completeStep(SyncStatus::PHASE_DOWNLOAD, sprintf(
             /* translators: %s = Datenmenge */

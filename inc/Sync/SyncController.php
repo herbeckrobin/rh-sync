@@ -469,8 +469,14 @@ final class SyncController
             return new WP_Error('rhbp_file_missing', __('Backup-Datei nicht lesbar.', 'rh-sync'), ['status' => 404]);
         }
 
-        // Token ist Single-Use
-        delete_transient($transientKey);
+        // Sliding TTL statt Single-Use: der Download läuft chunked über viele Range-Requests
+        // (resume-bar bei großen Uploads). Jeder gültige Zugriff schiebt das Ablauf-Fenster
+        // um DOWNLOAD_TTL nach vorn, solange Fortschritt läuft. Nach dem letzten Zugriff
+        // verfällt das Token regulär (kein dauerhafter Download-Link).
+        set_transient($transientKey, $data, self::DOWNLOAD_TTL);
+
+        $fileSize = (int) filesize($resolved);
+        $range = self::parseRangeHeader($request->get_header('range'), $fileSize);
 
         // Aktive Output-Buffer leeren: sonst puffert PHP die komplette Datei in den
         // Speicher bevor sie rausgeht und sprengt bei großen Backups das memory_limit.
@@ -481,13 +487,122 @@ final class SyncController
         @set_time_limit(0);
 
         nocache_headers();
+        header('Accept-Ranges: bytes');
         header('Content-Type: application/zip');
         header('Content-Disposition: attachment; filename="' . basename($resolved) . '"');
-        header('Content-Length: ' . (string) filesize($resolved));
 
+        if ($range === 'unsatisfiable') {
+            header('Content-Range: bytes */' . $fileSize);
+            http_response_code(416);
+            exit;
+        }
+
+        if (is_array($range)) {
+            http_response_code(206);
+            header('Content-Range: bytes ' . $range['start'] . '-' . $range['end'] . '/' . $fileSize);
+            header('Content-Length: ' . (string) $range['length']);
+            $this->streamFileRange($resolved, $range['start'], $range['length']);
+            exit;
+        }
+
+        // Kein/ungültiger Range: volle Datei (Abwärtskompat für alte Clients).
+        header('Content-Length: ' . (string) $fileSize);
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- Streaming großer Backup-Dateien, WP_Filesystem lädt komplette Dateien in den RAM und ist auf Shared Hosting untauglich.
         readfile($resolved);
         exit;
+    }
+
+    /**
+     * Parst einen HTTP-Range-Header für eine Datei bekannter Größe.
+     *
+     * Unterstützt genau einen einzelnen Byte-Range: geschlossen (`bytes=start-end`)
+     * oder offen (`bytes=start-`). Multi-Range, Suffix-Range (`bytes=-N`) und alles
+     * Ungültige fallen bewusst auf `null` zurück, der Aufrufer liefert dann die volle
+     * Datei mit Status 200 (kein Multipart-Support nötig, der Sync-Client sendet immer
+     * geschlossene Ranges).
+     *
+     * @return array{start:int,end:int,length:int}|string|null Array bei gültigem Range,
+     *   'unsatisfiable' wenn der Range außerhalb der Datei liegt (416), null sonst (volle Datei).
+     */
+    public static function parseRangeHeader(?string $header, int $fileSize): array|string|null
+    {
+        if ($header === null) {
+            return null;
+        }
+
+        $header = trim($header);
+        if ($header === '' || stripos($header, 'bytes=') !== 0) {
+            return null;
+        }
+
+        $spec = trim(substr($header, 6));
+
+        // Multi-Range wird nicht unterstützt.
+        if (strpos($spec, ',') !== false) {
+            return null;
+        }
+
+        if (!preg_match('/^(\d*)-(\d*)$/', $spec, $m)) {
+            return null;
+        }
+
+        // Suffix-Range (bytes=-N) wird nicht unterstützt: volle Datei.
+        if ($m[1] === '') {
+            return null;
+        }
+
+        if ($fileSize <= 0) {
+            return null;
+        }
+
+        $start = (int) $m[1];
+        if ($start >= $fileSize) {
+            return 'unsatisfiable';
+        }
+
+        $end = $m[2] === '' ? $fileSize - 1 : (int) $m[2];
+        if ($end >= $fileSize) {
+            $end = $fileSize - 1;
+        }
+        if ($end < $start) {
+            return 'unsatisfiable';
+        }
+
+        return [
+            'start' => $start,
+            'end' => $end,
+            'length' => $end - $start + 1,
+        ];
+    }
+
+    /**
+     * Streamt genau $length Bytes ab Offset $start aus einer Datei, gepuffert (1 MB),
+     * ohne die ganze Datei in den RAM zu laden.
+     */
+    private function streamFileRange(string $path, int $start, int $length): void
+    {
+        // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fread, WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Byte-genaues Range-Streaming großer Backup-Dateien; WP_Filesystem kann keinen Offset lesen und lädt komplett in den RAM.
+        $fp = fopen($path, 'rb');
+        if ($fp === false) {
+            return;
+        }
+
+        fseek($fp, $start);
+        $remaining = $length;
+        $bufferSize = 1024 * 1024;
+
+        while ($remaining > 0 && !feof($fp)) {
+            $read = fread($fp, (int) min($bufferSize, $remaining));
+            if ($read === false || $read === '') {
+                break;
+            }
+            echo $read; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Binärdaten (ZIP-Bytes), kein HTML.
+            $remaining -= strlen($read);
+            flush();
+        }
+
+        fclose($fp);
+        // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fread, WordPress.WP.AlternativeFunctions.file_system_operations_fclose
     }
 
     private function estimateDirectorySize(string $path): int

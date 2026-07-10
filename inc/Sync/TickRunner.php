@@ -26,6 +26,8 @@ final class TickRunner
     public function __construct(
         callable $advancerResolver,
         private readonly JobScheduler $scheduler,
+        private readonly SyncLog $log,
+        private readonly PeerRegistry $peers,
     ) {
         $this->advancerResolver = $advancerResolver;
     }
@@ -84,16 +86,83 @@ final class TickRunner
             ($this->advancerResolver)($job)->advance($job);
         } catch (\Throwable $e) {
             $job->finishFailure($e->getMessage(), $job->stage);
+            $this->logCompletion($job);
             return;
         }
 
         if ($job->isFinished()) {
+            $this->logCompletion($job);
             return;
         }
 
         // Heartbeat + Frontend-Projektion, dann nächsten Tick anstoßen.
         $job->touch();
         $this->scheduler->spawnLoopback($job);
+    }
+
+    /**
+     * Schreibt einen History-Eintrag, sobald ein Job final ist (done/failed), genau einmal.
+     *
+     * Der Tick-Pfad schließt Jobs über {@see JobState::finishSuccess()}/finishFailure() ab, die
+     * selbst NICHT loggen. Ohne diesen zentralen Punkt bliebe der Verlauf leer. Idempotent über
+     * das persistierte `logged`-Flag: mehrfacher Aufruf (verschiedene Abschlusswege, GC-Nachhol)
+     * erzeugt keinen Doppel-Eintrag. Push (Upload) und Pull (Download) werden gleichermaßen
+     * geloggt; der reine Inbound-Import auf der Ziel-Seite eines Push wird beim Initiator geloggt.
+     */
+    private function logCompletion(JobState $job): void
+    {
+        if (!$job->isFinished() || $job->logged) {
+            return;
+        }
+
+        // Reiner Inbound-Import (Gegenseite eines Push): der Initiator loggt, nicht das Ziel.
+        if ($job->direction !== SyncStatus::DIRECTION_PULL && $job->direction !== SyncStatus::DIRECTION_PUSH) {
+            $job->logged = true;
+            $job->save();
+            return;
+        }
+
+        $peer = $this->peers->get($job->peerId);
+        if ($peer === null) {
+            $job->logged = true;
+            $job->save();
+            return;
+        }
+
+        $status = $job->stage === SyncStatus::PHASE_DONE ? 'success' : 'failed';
+
+        $bytes = (int) ($job->summary['bytes'] ?? ($job->bytesTotal > 0 ? $job->bytesTotal : $job->bytesNow));
+
+        $durationMs = 0;
+        if ($job->startedAt !== null && $job->endedAt !== null) {
+            $durationMs = max(0, ($job->endedAt - $job->startedAt) * 1000);
+        }
+
+        $error = is_array($job->error) && isset($job->error['message']) ? (string) $job->error['message'] : null;
+
+        $manifest = is_array($job->cursor['source_manifest'] ?? null) ? $job->cursor['source_manifest'] : null;
+
+        $safety = null;
+        if (is_array($job->error) && !empty($job->error['safety_backup_path'])) {
+            $safety = (string) $job->error['safety_backup_path'];
+        } elseif (is_array($job->summary) && !empty($job->summary['safety_backup_path'])) {
+            $safety = (string) $job->summary['safety_backup_path'];
+        }
+
+        $this->log->record(
+            $peer,
+            $job->direction,
+            $status,
+            $bytes,
+            (int) $durationMs,
+            $error,
+            SyncProfile::fromArray($job->profile),
+            $manifest,
+            $safety
+        );
+
+        $job->logged = true;
+        $job->save();
     }
 
     /**
@@ -119,6 +188,7 @@ final class TickRunner
                     __('Der Sync blieb stehen (kein Fortschritt mehr). Bitte neu starten.', 'rh-sync'),
                     $job->stage
                 );
+                $this->logCompletion($job);
                 continue;
             }
 
@@ -134,6 +204,37 @@ final class TickRunner
         // Platte bei großen Transfers.
         if (function_exists('rh_db_engine')) {
             rh_db_engine()->storage()->gcStaleJobs(2 * HOUR_IN_SECONDS);
+        }
+
+        $this->gcFinishedStates();
+    }
+
+    /**
+     * Räumt abgeschlossene, bereits geloggte Job-State-Options auf, die eine Stunde nach dem
+     * Ende noch herumliegen. `finishSuccess()`/finishFailure() entfernen den Job nur aus dem
+     * Index, löschen die State-Option aber nicht (die UI zeigt den Abschluss noch an). Ohne
+     * diesen GC blieben abgeschlossene States dauerhaft als verwaiste Options liegen.
+     *
+     * Zusätzlich Sicherheitsnetz: ein finaler, aber noch ungeloggter State (der finishende Tick
+     * starb vor {@see logCompletion()}) wird hier nachgeloggt, bevor er später gepurged wird.
+     */
+    private function gcFinishedStates(): void
+    {
+        foreach (JobState::allStateJobIds() as $jobId) {
+            $job = JobState::load($jobId);
+            if ($job === null || !$job->isFinished()) {
+                continue;
+            }
+
+            // Ungeloggte finale States nachloggen (garantiert die History, auch bei Tick-Tod).
+            if (!$job->logged) {
+                $this->logCompletion($job);
+            }
+
+            // Erst purgen, wenn geloggt UND das 1h-Grace-Fenster (UI-Anzeige) abgelaufen ist.
+            if ($job->logged && $job->endedAt !== null && (time() - $job->endedAt) > HOUR_IN_SECONDS) {
+                $job->purge();
+            }
         }
     }
 

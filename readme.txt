@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.3.3
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,11 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.4.0 =
+* Resumable chunked download: large uploads no longer abort mid-transfer. The pull download now uses HTTP range requests with a byte-offset cursor that survives across ticks, so a dropped connection only costs the current chunk and the next tick resumes.
+* Sync history now records every run (pull and push) in the tick-based path. Previously the log stayed empty because completed jobs never wrote an entry.
+* Orphaned finished job states are garbage-collected after a grace period instead of piling up as stale options.
 
 = 0.3.2 =
 * First release in the WordPress plugin directory.

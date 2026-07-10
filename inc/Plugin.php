@@ -75,7 +75,7 @@ final class Plugin
                 default => $pullOperation,
             };
         };
-        $ticker = new TickRunner($advancerResolver, $scheduler);
+        $ticker = new TickRunner($advancerResolver, $scheduler, $syncLog, $peerRegistry);
         $ticker->boot();
 
         $syncPeersPage = new SyncPeersPage($peerRegistry, $pullOperation, $pushOperation, $syncLog, $syncClient, $ticker);

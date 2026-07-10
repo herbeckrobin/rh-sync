@@ -61,6 +61,7 @@ final class JobState
         public ?array $error = null,
         public int $retries = 0,
         public bool $importCommitted = false,
+        public bool $logged = false,
     ) {
     }
 
@@ -149,6 +150,33 @@ final class JobState
         }
 
         return $out;
+    }
+
+    /**
+     * Alle existierenden Job-State-Options direkt aus der DB (auch die aus dem Index bereits
+     * entfernten, abgeschlossenen States). Für den GC verwaister States gedacht.
+     *
+     * @return array<int, string> Liste der jobIds.
+     */
+    public static function allStateJobIds(): array
+    {
+        global $wpdb;
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- gezielter Options-Scan für den State-GC, kein Caching sinnvoll (soll den frischen DB-Stand sehen).
+        $names = $wpdb->get_col($wpdb->prepare(
+            "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+            $wpdb->esc_like(self::OPTION_PREFIX) . '%'
+        ));
+
+        $ids = [];
+        foreach ((array) $names as $name) {
+            $id = substr((string) $name, strlen(self::OPTION_PREFIX));
+            if (preg_match('/^[a-f0-9]{32}$/', $id)) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
     }
 
     // ============================================================
@@ -370,6 +398,7 @@ final class JobState
             'error' => $this->error,
             'retries' => $this->retries,
             'import_committed' => $this->importCommitted,
+            'logged' => $this->logged,
         ];
     }
 
@@ -401,6 +430,7 @@ final class JobState
             error: is_array($data['error'] ?? null) ? $data['error'] : null,
             retries: (int) ($data['retries'] ?? 0),
             importCommitted: (bool) ($data['import_committed'] ?? false),
+            logged: (bool) ($data['logged'] ?? false),
         );
     }
 }
