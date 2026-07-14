@@ -25,7 +25,9 @@ final class Preflight
     public static function localLimits(): array
     {
         $contentDir = defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : ABSPATH;
-        $diskFree = @disk_free_space($contentDir);
+        // disk_free_space ist auf Shared-Hostern oft per disable_functions gesperrt.
+        // Dann ist der Aufruf ein Fatal (das @ unterdrückt nur Warnings, keine undefined function).
+        $diskFree = function_exists('disk_free_space') ? @disk_free_space($contentDir) : false;
 
         return [
             'memory_limit' => self::bytesFromIni((string) ini_get('memory_limit')),

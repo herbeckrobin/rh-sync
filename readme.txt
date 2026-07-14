@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.4.1
+Stable tag: 0.4.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,9 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.4.2 =
+* Fixes a fatal error on shared hosts where disk_free_space is blocked via disable_functions (e.g. Confixx/twosteps). The preflight check now guards the call with function_exists; when the function is unavailable, free disk space is reported as unknown and the sync is not blocked.
 
 = 0.4.1 =
 * Bundles db-engine 1.1.3: fixes a backup import that aborted with "no db_prefix" when the media library contained a file named manifest.json (e.g. from Really Simple SSL). The unpacker now matches db.sql and manifest.json by full path instead of filename, so a same-named upload no longer overwrites the real manifest.

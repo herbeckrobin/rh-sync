@@ -5,7 +5,7 @@
  * Plugin URI:        https://github.com/herbeckrobin/rh-sync
  * Update URI:        https://github.com/herbeckrobin/rh-sync
  * Description:       Peer-to-Peer Sync zwischen WordPress-Instanzen über REST-API und HMAC-SHA256. Teil der rh-blueprint Kollektion.
- * Version:           0.4.1
+ * Version:           0.4.2
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            Robin Herbeck
