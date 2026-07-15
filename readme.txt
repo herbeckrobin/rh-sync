@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.4.2
+Stable tag: 0.4.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,9 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.4.3 =
+* New: an opt-in checkbox "Allow HTTP (unencrypted)" in the peer setup dialogs lets you add a peer over HTTP when the other side has no HTTPS. Off by default with a clear warning; the HTTPS requirement stays the default. The SSRF guard (private/reserved target IPs) still applies even with the opt-in set. Also fixes the RHSYNC_VERSION constant that was left at 0.4.1.
 
 = 0.4.2 =
 * Fixes a fatal error on shared hosts where disk_free_space is blocked via disable_functions (e.g. Confixx/twosteps). The preflight check now guards the call with function_exists; when the function is unavailable, free disk space is reported as unknown and the sync is not blocked.

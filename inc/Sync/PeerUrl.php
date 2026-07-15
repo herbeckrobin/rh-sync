@@ -20,6 +20,11 @@ namespace RhSync\Sync;
  * Stattdessen entscheidet der Host selbst: öffentliche Hosts müssen HTTPS sprechen,
  * lokale Dev-Hosts (.ddev.site, .test, .local, localhost) dürfen http.
  *
+ * Der Admin kann den HTTPS-Zwang pro Peer bewusst übergehen (Checkbox mit Warnung
+ * im Anlege-Dialog), wenn die Gegenseite kein HTTPS kann. Das lockert NUR die
+ * Vertraulichkeits-Prüfung, der SSRF-Block (private/reservierte Ziel-IPs) bleibt
+ * hart, auch mit gesetztem Opt-in.
+ *
  * SSRF blockt nur LITERALE private/reservierte IPs in der URL. Hostnamen die per
  * DNS auf eine private IP zeigen, blocken wir absichtlich nicht: das wäre der
  * DNS-Rebinding-Vektor, der bei einem admin-only Feature nur eine Selbst-Attacke
@@ -32,7 +37,7 @@ final class PeerUrl
      * Prüft eine Peer-URL. Liefert `null` wenn ok, sonst einen Fehler-Code für die
      * Redirect-Message-Map ('peer_insecure_url' | 'peer_blocked_host' | 'peer_invalid_url').
      */
-    public static function validate(string $url): ?string
+    public static function validate(string $url, bool $userConfirmedInsecure = false): ?string
     {
         $scheme = strtolower((string) wp_parse_url($url, PHP_URL_SCHEME));
         $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
@@ -41,11 +46,12 @@ final class PeerUrl
             return 'peer_invalid_url';
         }
 
+        // SSRF bleibt hart, auch wenn der Admin http bewusst bestätigt hat.
         if (self::isBlockedHost($host) && ! self::allowPrivate($url)) {
             return 'peer_blocked_host';
         }
 
-        if ($scheme !== 'https' && ! self::allowInsecure($host)) {
+        if ($scheme !== 'https' && ! $userConfirmedInsecure && ! self::allowInsecure($host)) {
             return 'peer_insecure_url';
         }
 

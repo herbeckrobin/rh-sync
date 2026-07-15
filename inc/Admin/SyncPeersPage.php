@@ -206,6 +206,7 @@ final class SyncPeersPage
         $url = isset($_POST['peer_url']) ? esc_url_raw(wp_unslash($_POST['peer_url'])) : '';
         $tokenInput = isset($_POST['peer_token']) ? sanitize_text_field(wp_unslash($_POST['peer_token'])) : '';
         $pairingInput = isset($_POST['peer_pairing']) ? sanitize_text_field(wp_unslash($_POST['peer_pairing'])) : '';
+        $allowInsecure = isset($_POST['peer_allow_insecure']);
 
         $pairing = null;
         if ($pairingInput !== '') {
@@ -230,8 +231,9 @@ final class SyncPeersPage
             $this->redirect('peer_invalid_url');
         }
 
-        // HTTPS-Zwang + SSRF-Schutz (in Produktion hart, in Dev per Environment-Default offen).
-        $urlError = PeerUrl::validate($url);
+        // HTTPS-Zwang + SSRF-Schutz. Den HTTPS-Zwang kann der Admin per Checkbox
+        // bewusst übergehen (öffentlicher Host ohne Cert), der SSRF-Block bleibt hart.
+        $urlError = PeerUrl::validate($url, $allowInsecure);
         if ($urlError !== null) {
             $this->redirect($urlError);
         }
@@ -1315,6 +1317,25 @@ final class SyncPeersPage
         echo '</label>';
     }
 
+    /**
+     * Opt-in, um den HTTPS-Zwang für einen Peer bewusst zu übergehen (Gegenseite ohne
+     * Cert). Mit klarer Warnung, weil über http der komplette DB-Dump im Klartext reist.
+     * Der SSRF-Block bleibt unabhängig davon hart (private/reservierte Ziel-IPs).
+     */
+    private function renderInsecureOptIn(): void
+    {
+        echo '<div class="rhbp-field">';
+        $this->renderCheckRow(
+            'peer_allow_insecure',
+            __('HTTP erlauben (unverschlüsselt)', 'rh-sync'),
+            __('Nur wenn die Gegenseite kein HTTPS kann.', 'rh-sync'),
+            false
+        );
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten.
+        echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:10px;">' . $this->icon('warning', 'sm') . '<span>' . esc_html__('Über HTTP reisen die Sync-Daten (kompletter DB-Dump mit Nutzer- und Zugangsdaten) im Klartext, jeder im Netzwerkpfad kann mitlesen. Für Produktivdaten nicht empfohlen.', 'rh-sync') . '</span></div>';
+        echo '</div>';
+    }
+
     private function renderHistory(): void
     {
         $entries = $this->log->all();
@@ -1495,6 +1516,8 @@ final class SyncPeersPage
         echo '<p class="rhbp-hint">' . esc_html__('Wohin diese Site synchronisiert. Die Gegenseite bekommt deine Adresse automatisch über den Code, du musst dort nichts eintippen.', 'rh-sync') . '</p>';
         echo '</div>';
 
+        $this->renderInsecureOptIn();
+
         echo '</div>'; // body
 
         echo '<div class="rhbp-modal__foot">';
@@ -1539,6 +1562,9 @@ final class SyncPeersPage
         echo '<textarea id="rhbp-join-code" name="peer_pairing" rows="3" placeholder="' . esc_attr__('Code hier einfügen…', 'rh-sync') . '" required></textarea>';
         echo '<p class="rhbp-hint">' . esc_html__('Name und Adresse der Gegenseite werden automatisch übernommen, du musst nichts weiter eintippen.', 'rh-sync') . '</p>';
         echo '</div>';
+
+        $this->renderInsecureOptIn();
+
         echo '</div>';
 
         echo '<div class="rhbp-modal__foot">';
