@@ -366,6 +366,21 @@ final class JobState
         }
     }
 
+    /**
+     * Aktualisiert nur die Meldung des laufenden Steps (Status und Start-Zeit bleiben
+     * unangetastet). Für Live-Hinweise im Fortschritts-Modal, z.B. dass die Download-
+     * Blockgröße reduziert wurde, weil die Quelle große Blöcke abbricht.
+     */
+    public function updateStepMessage(string $phase, string $message): void
+    {
+        $this->message = $message;
+        foreach ($this->steps as $i => $step) {
+            if (($step['id'] ?? null) === $phase) {
+                $this->steps[$i]['message'] = $message;
+            }
+        }
+    }
+
     // ============================================================
     // Serialisierung
     // ============================================================

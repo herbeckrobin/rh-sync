@@ -145,7 +145,12 @@ final class PullOperation implements StageAdvancer
             return;
         }
 
-        $chunkSize = max(1, (int) apply_filters('rh-blueprint/sync/download_chunk_size', self::DOWNLOAD_CHUNK_SIZE));
+        // Untergrenze und Startwert der Blockgröße. Die aktuelle Größe wird im Cursor
+        // gehalten: schrumpft sie einmal (weil die Quelle große Blöcke abbricht), bleibt
+        // die kleinere Größe für alle Folge-Blöcke erhalten (nur einmal einregeln).
+        $minChunk     = max(64 * 1024, (int) apply_filters('rh-blueprint/sync/download_min_chunk_size', 128 * 1024));
+        $defaultChunk = max($minChunk, (int) apply_filters('rh-blueprint/sync/download_chunk_size', self::DOWNLOAD_CHUNK_SIZE));
+        $chunkSize    = max($minChunk, (int) ($job->cursor['download_chunk_size'] ?? $defaultChunk));
         $offset = (int) ($job->cursor['download_offset'] ?? 0);
         $retries = (int) ($job->cursor['download_retries'] ?? 0);
         $deadline = microtime(true) + $job->tickBudget;
@@ -161,9 +166,30 @@ final class PullOperation implements StageAdvancer
             try {
                 $result = $this->client->downloadRange($url, $peer, $offset, $len, $part);
             } catch (\Throwable $e) {
-                // Transienter Netzwerkfehler (cURL 18 etc.): partiellen Chunk verwerfen, ab dem
-                // letzten persistierten Offset weiter. Erst nach MAX_RETRIES endgültig aufgeben.
                 $this->deletePart($part);
+
+                // Manche Hoster (mod_fcgid/mod_security) killen den PHP-Prozess der Quelle,
+                // sobald ein Response eine bestimmte Größe überschreitet ("Empty reply",
+                // kein Fatal). Dann hilft kein Wiederholen mit gleicher Größe, sondern die
+                // Blockgröße halbieren und ab demselben Offset weiter. So regelt sich der
+                // Download selbst auf eine verträgliche Größe ein, ohne Server-Zugang.
+                if ($chunkSize > $minChunk) {
+                    $chunkSize = max($minChunk, intdiv($chunkSize, 2));
+                    $job->cursor['download_chunk_size'] = $chunkSize;
+                    $job->updateStepMessage(
+                        SyncStatus::PHASE_DOWNLOAD,
+                        sprintf(
+                            /* translators: %s = Blockgröße, z.B. "512 KB" */
+                            __('Die Quelle bricht große Blöcke ab. Reduziere die Blockgröße auf %s und lade weiter.', 'rh-sync'),
+                            size_format($chunkSize)
+                        )
+                    );
+                    $job->save();
+                    continue; // gleicher Tick, gleicher Offset, kleinerer Block
+                }
+
+                // Bereits an der Mindest-Blockgröße: das ist ein echter (Netzwerk-)Fehler,
+                // ab dem letzten Offset erneut versuchen, nach MAX_RETRIES endgültig aufgeben.
                 if ($this->bumpRetry($job, ++$retries, $e->getMessage())) {
                     return;
                 }
