@@ -443,7 +443,8 @@ final class SyncController
     }
 
     /**
-     * @return never|WP_Error
+     * @return never|WP_Error|array<string, mixed> Roh-Stream endet mit exit (never); der
+     *   base64-JSON-Modus (format=json) gibt ein Array zurück, das WP als JSON rendert.
      */
     public function handleDownload(WP_REST_Request $request)
     {
@@ -480,6 +481,33 @@ final class SyncController
         set_transient($transientKey, $data, self::DOWNLOAD_TTL);
 
         $fileSize = (int) filesize($resolved);
+
+        // base64-JSON-Modus: manche Webserver/WAFs (mod_security) blocken binäre Download-
+        // Responses, weil sie die ZIP-/SQL-Signatur im Body als verdächtig einstufen, die
+        // Verbindung wird ohne ein Byte resettet. Dann fordert der Client den Range über
+        // format=json an und bekommt ihn base64-kodiert in einer normalen JSON-Antwort, die
+        // passiert den Filter. Query: format=json&start=…&length=…
+        if ($request->get_param('format') === 'json') {
+            $start  = max(0, (int) $request->get_param('start'));
+            $length = (int) $request->get_param('length');
+            if ($length <= 0) {
+                $length = $fileSize - $start;
+            }
+            if ($start >= $fileSize) {
+                return ['chunk' => '', 'start' => $start, 'bytes' => 0, 'total' => $fileSize, 'eof' => true];
+            }
+            $length = (int) min($length, $fileSize - $start);
+            $chunk  = self::readFileRange($resolved, $start, $length);
+
+            return [
+                'chunk' => base64_encode($chunk),
+                'start' => $start,
+                'bytes' => strlen($chunk),
+                'total' => $fileSize,
+                'eof'   => ($start + strlen($chunk)) >= $fileSize,
+            ];
+        }
+
         $range = self::parseRangeHeader($request->get_header('range'), $fileSize);
 
         // Aktive Output-Buffer leeren: sonst puffert PHP die komplette Datei in den
@@ -589,6 +617,35 @@ final class SyncController
      * Streamt genau $length Bytes ab Offset $start aus einer Datei, gepuffert (1 MB),
      * ohne die ganze Datei in den RAM zu laden.
      */
+    /**
+     * Liest einen Byte-Range aus einer Datei in den Speicher (für den base64-JSON-Modus).
+     * Bewusst nur für Chunk-Größen gedacht (nicht die ganze Datei), base64 verdoppelt den
+     * Speicher kurzzeitig.
+     */
+    private static function readFileRange(string $path, int $start, int $length): string
+    {
+        // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fread, WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+        $fp = fopen($path, 'rb');
+        if ($fp === false) {
+            return '';
+        }
+        fseek($fp, $start);
+        $out       = '';
+        $remaining = $length;
+        while ($remaining > 0 && ! feof($fp)) {
+            $read = fread($fp, (int) min(1048576, $remaining));
+            if ($read === false || $read === '') {
+                break;
+            }
+            $out       .= $read;
+            $remaining -= strlen($read);
+        }
+        fclose($fp);
+        // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fread, WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+
+        return $out;
+    }
+
     private function streamFileRange(string $path, int $start, int $length): void
     {
         // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fread, WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Byte-genaues Range-Streaming großer Backup-Dateien; WP_Filesystem kann keinen Offset lesen und lädt komplett in den RAM.

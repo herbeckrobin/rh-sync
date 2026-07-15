@@ -164,15 +164,31 @@ final class PullOperation implements StageAdvancer
             $job->touch();
 
             try {
-                $result = $this->client->downloadRange($url, $peer, $offset, $len, $part);
+                $result = empty($job->cursor['download_json_mode'])
+                    ? $this->client->downloadRange($url, $peer, $offset, $len, $part)
+                    : $this->client->downloadRangeJson($url, $peer, $offset, $len, $part);
             } catch (\Throwable $e) {
                 $this->deletePart($part);
 
-                // Manche Hoster (mod_fcgid/mod_security) killen den PHP-Prozess der Quelle,
-                // sobald ein Response eine bestimmte Größe überschreitet ("Empty reply",
-                // kein Fatal). Dann hilft kein Wiederholen mit gleicher Größe, sondern die
-                // Blockgröße halbieren und ab demselben Offset weiter. So regelt sich der
-                // Download selbst auf eine verträgliche Größe ein, ohne Server-Zugang.
+                // 1. Roher Binär-Download wird von einer WAF (mod_security) geblockt, die die
+                //    ZIP-/SQL-Signatur im Response-Body erkennt und die Verbindung ohne ein
+                //    Byte resettet (auch winzige Blöcke sterben). Auf base64-JSON umschalten:
+                //    die Antwort ist Text und passiert den Filter. Blockgröße auf 1 MB deckeln,
+                //    weil base64 die Antwort um ~1/3 aufbläht.
+                if (empty($job->cursor['download_json_mode'])) {
+                    $job->cursor['download_json_mode'] = true;
+                    $chunkSize = min($chunkSize, 1048576);
+                    $job->cursor['download_chunk_size'] = $chunkSize;
+                    $job->updateStepMessage(
+                        SyncStatus::PHASE_DOWNLOAD,
+                        __('Die Quelle blockt den Binär-Download. Wechsle auf base64-Übertragung und lade weiter.', 'rh-sync')
+                    );
+                    $job->save();
+                    continue; // gleicher Tick, gleicher Offset, jetzt base64-JSON
+                }
+
+                // 2. Auch im base64-Modus Fehler (z.B. Größen-/Zeit-Limit): Blockgröße halbieren
+                //    und ab demselben Offset weiter. So regelt sich der Download selbst ein.
                 if ($chunkSize > $minChunk) {
                     $chunkSize = max($minChunk, intdiv($chunkSize, 2));
                     $job->cursor['download_chunk_size'] = $chunkSize;

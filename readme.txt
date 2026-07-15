@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.4.5
+Stable tag: 0.4.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,9 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.4.6 =
+* base64 download fallback: some servers (mod_security/WAF) reject the binary ZIP response of a pull, resetting the connection before a single byte even for tiny ranges, because they flag the ZIP/SQL signature in the body. When the raw download is refused, the client now switches to a base64-over-JSON transport for the same offset. The JSON response is text and passes the filter, so pull works on those hosts too. Falls back to smaller blocks if needed; the progress window shows the switch. Both sites must run 0.4.6.
 
 = 0.4.5 =
 * Adaptive download block size: some hosts (mod_fcgid/mod_security) kill the source PHP process once a response exceeds a size limit ("Empty reply", no PHP fatal), which made pull impossible on those servers. The client now halves the download block size automatically when a block is rejected (down to a minimum) and continues from the same offset, so the download settles on a size the server accepts, no server config needed. The progress window shows when the block size is reduced.

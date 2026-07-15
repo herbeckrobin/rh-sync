@@ -177,6 +177,56 @@ final class SyncClient
     }
 
     /**
+     * Lädt einen Byte-Range base64-kodiert über eine JSON-Antwort (format=json). Für Server,
+     * deren WAF binäre Download-Responses blockt (siehe {@see downloadRange()}). Die JSON-
+     * Antwort passiert den Filter, der Client dekodiert und schreibt in $partFile.
+     *
+     * @return array{status:int, bytes:int} status 206 (analog zum Range-Chunk), bytes = geschriebene Bytes.
+     * @throws \RuntimeException bei Transport-Fehler, unerwartetem Status oder kaputter Antwort.
+     */
+    public function downloadRangeJson(string $url, ?Peer $peer, int $start, int $length, string $partFile): array
+    {
+        $sep     = strpos($url, '?') === false ? '?' : '&';
+        $jsonUrl = $url . $sep . 'format=json&start=' . $start . '&length=' . $length;
+
+        $response = wp_remote_get($jsonUrl, [
+            'timeout'   => self::CHUNK_TIMEOUT,
+            'sslverify' => apply_filters('rh-blueprint/sync/sslverify', true, $peer),
+        ]);
+
+        if (is_wp_error($response)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird am Anzeige-Layer via esc_html escapt.
+            throw new \RuntimeException('Download (base64) fehlgeschlagen: ' . self::describeTransportError($response->get_error_message()));
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        $body   = (string) wp_remote_retrieve_body($response);
+
+        if ($status !== 200) {
+            $detail = mb_substr(trim($body), 0, 200);
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird am Anzeige-Layer via esc_html escapt.
+            throw new \RuntimeException('Download (base64) HTTP-Status ' . $status . ($detail !== '' ? ' (' . $detail . ')' : ''));
+        }
+
+        $data = json_decode($body, true);
+        if (! is_array($data) || ! array_key_exists('chunk', $data)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird am Anzeige-Layer via esc_html escapt.
+            throw new \RuntimeException('Download (base64): unerwartete Antwort der Quelle.');
+        }
+
+        $bytes = base64_decode((string) $data['chunk'], true);
+        if ($bytes === false) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird am Anzeige-Layer via esc_html escapt.
+            throw new \RuntimeException('Download (base64): Antwort nicht dekodierbar.');
+        }
+
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Chunk-Datei schreiben, WP_Filesystem wäre hier Overhead.
+        file_put_contents($partFile, $bytes);
+
+        return ['status' => 206, 'bytes' => strlen($bytes)];
+    }
+
+    /**
      * Reichert eine Transport-Fehlermeldung (WP_Error) um einen Deutungshinweis an.
      * Eine leere Antwort (cURL 52 "Empty reply") ist die typische Signatur eines
      * Fatals auf der Gegenseite, z.B. einer per disable_functions gesperrten Funktion.
