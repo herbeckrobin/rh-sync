@@ -117,14 +117,14 @@ final class SyncClient
 
         if (is_wp_error($response)) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
-            throw new \RuntimeException('Download fehlgeschlagen: ' . $response->get_error_message());
+            throw new \RuntimeException('Download fehlgeschlagen: ' . self::describeTransportError($response->get_error_message()));
         }
 
         $status = (int) wp_remote_retrieve_response_code($response);
 
         if ($status !== 200) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
-            throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status);
+            throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status . self::describeErrorBody($destination));
         }
 
         if (!is_file($destination) || filesize($destination) === 0) {
@@ -161,19 +161,60 @@ final class SyncClient
 
         if (is_wp_error($response)) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
-            throw new \RuntimeException('Download fehlgeschlagen: ' . $response->get_error_message());
+            throw new \RuntimeException('Download fehlgeschlagen: ' . self::describeTransportError($response->get_error_message()));
         }
 
         $status = (int) wp_remote_retrieve_response_code($response);
 
         if ($status !== 206 && $status !== 200) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- interne Exception-Meldung, wird gefangen und am Anzeige-Layer via esc_html escapt, hier escapen würde den Log-Eintrag doppelt kodieren.
-            throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status);
+            throw new \RuntimeException('Download fehlgeschlagen mit HTTP-Status ' . $status . self::describeErrorBody($partFile));
         }
 
         $bytes = is_file($partFile) ? (int) filesize($partFile) : 0;
 
         return ['status' => $status, 'bytes' => $bytes];
+    }
+
+    /**
+     * Reichert eine Transport-Fehlermeldung (WP_Error) um einen Deutungshinweis an.
+     * Eine leere Antwort (cURL 52 "Empty reply") ist die typische Signatur eines
+     * Fatals auf der Gegenseite, z.B. einer per disable_functions gesperrten Funktion.
+     */
+    private static function describeTransportError(string $message): string
+    {
+        if (stripos($message, 'empty reply') !== false || stripos($message, 'error 52') !== false) {
+            return $message . ' (leere Antwort, deutet auf einen Fatal auf der Gegenseite hin, z.B. eine per disable_functions gesperrte PHP-Funktion)';
+        }
+
+        return $message;
+    }
+
+    /**
+     * Liest den JSON-Fehlerkörper, den die Gegenseite bei einem Fehler-Status geliefert
+     * hat. Bei stream=true schreibt WP auch den Fehler-Body in die Zieldatei, darum steht
+     * er dort und nicht in wp_remote_retrieve_body(). So landet der echte Grund
+     * (token_expired vs. file_missing, beide 404) im Log statt nur "HTTP-Status 404".
+     */
+    private static function describeErrorBody(string $file): string
+    {
+        if (!is_file($file) || filesize($file) === 0) {
+            return '';
+        }
+
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- kleiner Fehler-Body einer bereits gestreamten Datei, WP_Filesystem waere hier Overhead.
+        $raw = trim((string) file_get_contents($file, false, null, 0, 500));
+        if ($raw === '') {
+            return '';
+        }
+
+        $json = json_decode($raw, true);
+        if (is_array($json) && isset($json['code']) && is_string($json['code'])) {
+            $msg = (isset($json['message']) && is_string($json['message'])) ? ': ' . $json['message'] : '';
+            return ' (' . $json['code'] . $msg . ')';
+        }
+
+        return ' (' . mb_substr($raw, 0, 200) . ')';
     }
 
     /**

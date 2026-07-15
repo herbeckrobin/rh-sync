@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.4.3
+Stable tag: 0.4.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,11 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.4.4 =
+* Fixes a fatal on shared hosts where set_time_limit is blocked via disable_functions: the download handler died before sending any bytes (client saw "Empty reply"), making pull impossible. The call is now guarded with function_exists.
+* A transient read miss on the backup file (race against the still-writing export, NFS latency) no longer deletes the download token. It returns 503 instead of 404, so the download retries can actually recover.
+* Download errors now carry the real reason into the log (peer-side fatal on "empty reply", and token_expired vs. file_missing which are both 404) instead of just "HTTP status 404".
 
 = 0.4.3 =
 * New: an opt-in checkbox "Allow HTTP (unencrypted)" in the peer setup dialogs lets you add a peer over HTTP when the other side has no HTTPS. Off by default with a clear warning; the HTTPS requirement stays the default. The SSRF guard (private/reserved target IPs) still applies even with the opt-in set. Also fixes the RHSYNC_VERSION constant that was left at 0.4.1.

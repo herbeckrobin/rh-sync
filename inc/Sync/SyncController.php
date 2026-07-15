@@ -465,8 +465,12 @@ final class SyncController
         // Path-Validation: muss im backups/ Ordner liegen
         $resolved = $this->storage->resolveInside($this->storage->backupsPath(), basename($zipPath));
         if ($resolved === null || !is_readable($resolved)) {
-            delete_transient($transientKey);
-            return new WP_Error('rhbp_file_missing', __('Backup-Datei nicht lesbar.', 'rh-sync'), ['status' => 404]);
+            // Token bewusst NICHT löschen: ein einzelner is_readable-Aussetzer (Race gegen
+            // den noch schreibenden Export, NFS-Latenz, kurze Last) darf nicht das ganze
+            // Token vernichten, sonst laufen alle DOWNLOAD_MAX_RETRIES garantiert in
+            // token_expired und die Retry-Logik ist wirkungslos. Das Token verfällt regulär
+            // nach seiner TTL. 503 signalisiert dem Client "transient, gleich nochmal".
+            return new WP_Error('rhbp_file_missing', __('Backup-Datei gerade nicht lesbar.', 'rh-sync'), ['status' => 503]);
         }
 
         // Sliding TTL statt Single-Use: der Download läuft chunked über viele Range-Requests
@@ -483,8 +487,14 @@ final class SyncController
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
-        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- set_time_limit ist auf manchen Hosts (Safe-Mode/disable_functions) deaktiviert und löst dann eine Warnung aus, das Unterdrücken ist hier gewollt, der lange Download soll trotzdem laufen.
-        @set_time_limit(0);
+        // set_time_limit ist auf Shared-Hostern per disable_functions oft gesperrt. Dann
+        // ist die Funktion undefined und der Aufruf ein FATAL (nicht nur eine Warnung, das
+        // @ fängt Fatals nicht). Der Download-Handler stürbe genau hier ab, direkt vor den
+        // Headern, der Client sähe nur "Empty reply". Darum vor dem Aufruf prüfen.
+        if (function_exists('set_time_limit')) {
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- kann trotz vorhandener Funktion (z.B. Safe-Mode-Rest) eine Warnung werfen, der lange Download soll trotzdem laufen.
+            @set_time_limit(0);
+        }
 
         nocache_headers();
         header('Accept-Ranges: bytes');
