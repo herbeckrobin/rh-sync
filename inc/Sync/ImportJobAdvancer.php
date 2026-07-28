@@ -66,7 +66,15 @@ final class ImportJobAdvancer implements StageAdvancer
     {
         $cursor = isset($job->cursor['ij_safety_cursor']) && is_array($job->cursor['ij_safety_cursor'])
             ? ExportCursor::fromArray($job->cursor['ij_safety_cursor'])
-            : ExportCursor::start($this->storage->jobWorkdir('ij-safety-' . $job->jobId), false, SyncDefaults::excludedTables());
+            : ExportCursor::start(
+                $this->storage->jobWorkdir('ij-safety-' . $job->jobId),
+                false,
+                SyncDefaults::excludedTables(),
+                // Sicherungskopien gehören zu den Backups, nicht flach dazwischen: so
+                // sind sie in der Liste als solche erkennbar und haben ihre eigene
+                // Aufbewahrungsgrenze.
+                $this->storage->backupsSubPath(SyncDefaults::SAFETY_SUBDIR)
+            );
 
         $cursor = $this->exporter->exportStep($cursor, $job->tickBudget);
         $job->cursor['ij_safety_cursor'] = $cursor->toArray();

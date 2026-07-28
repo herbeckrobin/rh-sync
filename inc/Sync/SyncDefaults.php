@@ -19,6 +19,15 @@ namespace RhSync\Sync;
 final class SyncDefaults
 {
     /**
+     * Unterordner für Sicherungskopien, die vor einem Import entstehen.
+     *
+     * Derselbe Name, den rh-backup für diesen Anlass verwendet (dort in BackupKind).
+     * Absichtlich als eigene Konstante und kein Verweis auf rh-backup: rh-sync läuft
+     * auch allein, und der Ordnername ist der einzige Berührungspunkt.
+     */
+    public const SAFETY_SUBDIR = 'presync';
+
+    /**
      * @return array<int, string>
      */
     public static function excludedTables(): array

@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.4.6
+Stable tag: 0.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,11 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.5.0 =
+* Transfer archives no longer pile up. Every push and every pull used to leave a full copy of the site behind in the backup folder, where nothing ever removed it: on a site synced weekly that is a new multi-hundred-megabyte file every week. Snapshots and push exports now live in the job's working directory and are removed when the job ends.
+* Safety copies taken before an import go to their own folder, so they are recognisable as such in the backup list and are kept to their own limit instead of crowding out real backups.
+* Requires db-engine 1.2.0, which is bundled.
 
 = 0.4.6 =
 * base64 download fallback: some servers (mod_security/WAF) reject the binary ZIP response of a pull, resetting the connection before a single byte even for tiny ranges, because they flag the ZIP/SQL signature in the body. When the raw download is refused, the client now switches to a base64-over-JSON transport for the same offset. The JSON response is text and passes the filter, so pull works on those hosts too. Falls back to smaller blocks if needed; the progress window shows the switch. Both sites must run 0.4.6.

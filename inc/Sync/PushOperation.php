@@ -60,10 +60,15 @@ final class PushOperation implements StageAdvancer
         if (!isset($job->cursor['ex_cursor'])) {
             $job->markStarted();
             $job->beginStep(SyncStatus::PHASE_EXPORT, __('Erstelle lokalen Snapshot...', 'rh-sync'));
+            // Das Archiv ist reine Transportware: es geht zum Peer und hat danach nichts
+            // mehr verloren. Es landet deshalb im Arbeitsverzeichnis des Jobs und nicht
+            // bei den Backups, wo es sich sonst bei jedem Push unbemerkt anhäuft.
+            $workdir = $this->storage->jobWorkdir('push-export-' . $job->jobId);
             $cursor = ExportCursor::start(
-                $this->storage->jobWorkdir('push-export-' . $job->jobId),
+                $workdir,
                 $profile->uploads,
-                SyncDefaults::excludedTables()
+                SyncDefaults::excludedTables(),
+                $workdir
             );
         } else {
             $cursor = ExportCursor::fromArray($job->cursor['ex_cursor']);
@@ -259,7 +264,12 @@ final class PushOperation implements StageAdvancer
             // 1. Lokaler Export
             SyncStatus::beginStep($jobId, SyncStatus::PHASE_EXPORT, __('Erstelle lokalen Snapshot...', 'rh-sync'));
             $phaseStart = microtime(true);
-            $localZip = $this->exporter->createBackup($effectiveProfile->uploads, SyncDefaults::excludedTables());
+            // Transportware, siehe stageExport: gehört nicht zu den Backups.
+            $localZip = $this->exporter->createBackup(
+                $effectiveProfile->uploads,
+                SyncDefaults::excludedTables(),
+                $this->storage->jobWorkdir('push-legacy-' . $jobId)
+            );
             $totalSize = (int) filesize($localZip);
             $phaseTimings['export'] = (int) ((microtime(true) - $phaseStart) * 1000);
             SyncStatus::progress($jobId, 0, $totalSize);

@@ -227,7 +227,14 @@ final class SyncController
         $includeUploads = (bool) $request->get_param('include_uploads');
 
         try {
-            $zipPath = $this->exporter->createBackup($includeUploads, SyncDefaults::excludedTables());
+            // Der Snapshot ist nur dazu da, dass der Peer ihn abholt. Er gehört deshalb
+            // in ein Arbeitsverzeichnis und nicht zu den Backups, wo er bei jedem Pull
+            // eines Peers unbemerkt liegen bliebe.
+            $zipPath = $this->exporter->createBackup(
+                $includeUploads,
+                SyncDefaults::excludedTables(),
+                $this->storage->jobWorkdir('snapshot-' . wp_generate_password(12, false, false))
+            );
         } catch (\Throwable $e) {
             return new WP_Error(
                 'rhbp_export_failed',
@@ -463,8 +470,20 @@ final class SyncController
 
         $zipPath = (string) $data['path'];
 
-        // Path-Validation: muss im backups/ Ordner liegen
-        $resolved = $this->storage->resolveInside($this->storage->backupsPath(), basename($zipPath));
+        // Pfad-Prüfung: der Snapshot muss in einem Arbeitsverzeichnis unter jobs/ liegen.
+        // Ältere Peers haben ihn noch flach in backups/ abgelegt, darum beide Wurzeln
+        // versuchen, sonst bricht ein Pull mitten in einer laufenden Übertragung ab.
+        $relativ = basename(dirname($zipPath)) . '/' . basename($zipPath);
+        $resolved = $this->storage->resolveInside($this->storage->jobsPath(), $relativ)
+            ?? $this->storage->resolveInside($this->storage->backupsPath(), basename($zipPath));
+
+        if ($resolved !== null) {
+            // Der Download läuft chunked über viele Anfragen und kann bei grossen
+            // Archiven Stunden dauern. Ohne Lebenszeichen räumt die Aufräum-Routine das
+            // Arbeitsverzeichnis mitten im Transfer weg.
+            $this->storage->touchJobWorkdir(dirname($resolved));
+        }
+
         if ($resolved === null || !is_readable($resolved)) {
             // Token bewusst NICHT löschen: ein einzelner is_readable-Aussetzer (Race gegen
             // den noch schreibenden Export, NFS-Latenz, kurze Last) darf nicht das ganze

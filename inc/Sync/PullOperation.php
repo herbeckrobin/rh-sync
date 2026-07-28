@@ -559,7 +559,11 @@ final class PullOperation implements StageAdvancer
 
     private function createSafetyBackup(): string
     {
-        return $this->exporter->createBackup(false, SyncDefaults::excludedTables());
+        return $this->exporter->createBackup(
+            false,
+            SyncDefaults::excludedTables(),
+            $this->storage->backupsSubPath(SyncDefaults::SAFETY_SUBDIR)
+        );
     }
 
     private function runImport(string $zipPath, string $safetyBackup, SyncProfile $profile): void
