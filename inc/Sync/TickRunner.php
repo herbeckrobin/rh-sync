@@ -82,13 +82,26 @@ final class TickRunner
 
         $job->markStarted();
 
+        // Ab hier führt jeder Schritt Protokoll in einer Datei. Stirbt der Prozess mitten
+        // im Tick (Speicher voll, Zeitlimit, Abschuss durch den Webserver), steht hinterher
+        // trotzdem da, wo er war. Der Job-Zustand in der Datenbank kann das nicht leisten:
+        // er liegt in genau der Tabelle, die ein Import gerade ersetzt.
+        JobTrace::arm($job->jobId, ['stage' => $job->stage, 'direction' => $job->direction]);
+        JobTrace::write($job->jobId, 'tick_start', ['stage' => $job->stage]);
+
         try {
             ($this->advancerResolver)($job)->advance($job);
         } catch (\Throwable $e) {
+            JobTrace::write($job->jobId, 'tick_exception', [
+                'stage' => $job->stage,
+                'message' => $e->getMessage(),
+            ]);
             $job->finishFailure($e->getMessage(), $job->stage);
             $this->logCompletion($job);
             return;
         }
+
+        JobTrace::write($job->jobId, 'tick_end', ['stage' => $job->stage]);
 
         if ($job->isFinished()) {
             $this->logCompletion($job);
@@ -207,6 +220,10 @@ final class TickRunner
         }
 
         $this->gcFinishedStates();
+
+        // Eine vergessene Notluke ist genau die Altlast, die man Monate später auf einer
+        // Kundensite findet. Nach Ablauf der Frist fliegt sie raus.
+        (new RecoveryHatch())->gc();
     }
 
     /**
