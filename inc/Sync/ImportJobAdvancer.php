@@ -181,12 +181,18 @@ final class ImportJobAdvancer implements StageAdvancer
     }
 
     /**
-     * Räumt Rettungsleine und Notluke ab, sobald sie nicht mehr gebraucht werden.
+     * Räumt ab, sobald der Lauf vorbei ist: Rettungsleine, Notluke und die Tabellen-Reste
+     * eines abgebrochenen Umschaltens.
      */
     private function standDown(JobState $job): void
     {
         (new GuardVault())->clear($job->jobId);
         (new RecoveryHatch())->disarm();
+
+        $left = (new \RhDbEngine\TableSwap())->dropLeftovers();
+        if ($left > 0) {
+            JobTrace::write($job->jobId, 'leftovers_dropped', ['tables' => $left]);
+        }
     }
 
     private function stepImport(JobState $job): void
@@ -225,10 +231,32 @@ final class ImportJobAdvancer implements StageAdvancer
         } catch (\Throwable $e) {
             JobTrace::write($job->jobId, 'import_failed', [
                 'import_phase' => $cursor->phase,
+                'swap_done' => $cursor->swapDone,
                 'message' => $e->getMessage(),
             ]);
-            // Importfehler NICHT werfen: in den Rollback überführen (Safety-Backup ist da).
+
             $job->cursor['ij_error'] = $e->getMessage();
+
+            // Wurde nie umgeschaltet, hat der Import die Live-Daten nie berührt: dann gibt
+            // es nichts zurückzuspielen, und ein Rollback würde nur unnötig eine intakte
+            // Datenbank überschreiben. Vor allem soll die Meldung nicht nach Schaden
+            // klingen, wo keiner ist.
+            if (!$cursor->liveDataTouched()) {
+                $this->cleanupWorkdirs($job);
+                $this->standDown($job);
+                JobTrace::write($job->jobId, 'import_failed_without_damage', []);
+                $job->finishFailure(
+                    sprintf(
+                        /* translators: %s = Fehlermeldung des Imports */
+                        __('Import fehlgeschlagen: %s. Die Site wurde nicht verändert und läuft unverändert weiter.', 'rh-sync'),
+                        $e->getMessage()
+                    ),
+                    SyncStatus::PHASE_IMPORT
+                );
+                return;
+            }
+
+            // Ab hier stehen die neuen Daten live: jetzt zählt das Sicherheits-Backup.
             $job->cursor['ij_phase'] = 'rollback';
             $job->save();
             return;

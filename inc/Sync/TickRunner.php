@@ -224,6 +224,37 @@ final class TickRunner
         // Eine vergessene Notluke ist genau die Altlast, die man Monate später auf einer
         // Kundensite findet. Nach Ablauf der Frist fliegt sie raus.
         (new RecoveryHatch())->gc();
+
+        $this->gcSwapLeftovers();
+    }
+
+    /**
+     * Entfernt Schattentabellen, die ein abgeschossener Lauf hinterlassen hat.
+     *
+     * Der Import räumt beim Start und bei jedem geordneten Ende selbst auf. Wird der
+     * Prozess hart abgeschossen, kommt er zu keinem von beidem, und die Tabellen liegen bis
+     * zum nächsten Lauf herum. Bei einer grossen Datenbank ist das der doppelte Platz.
+     *
+     * Nur wenn gerade kein Job läuft: sonst würde dieser Aufräumer einem laufenden Import
+     * die Tabellen unter den Füssen wegziehen.
+     */
+    private function gcSwapLeftovers(): void
+    {
+        if (!class_exists(\RhDbEngine\TableSwap::class)) {
+            return;
+        }
+
+        foreach (JobState::index() as $jobId => $peerId) {
+            $job = JobState::load($jobId);
+            if ($job !== null && !$job->isFinished()) {
+                return;
+            }
+        }
+
+        $dropped = (new \RhDbEngine\TableSwap())->dropLeftovers();
+        if ($dropped > 0) {
+            JobTrace::write('watchdog', 'leftovers_dropped', ['tables' => $dropped]);
+        }
     }
 
     /**
