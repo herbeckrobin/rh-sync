@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.5.0
+Stable tag: 0.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,15 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.6.0 =
+* An interrupted import no longer leaves the receiving site broken. The import now builds its tables alongside the live ones and switches over in a single atomic step at the very end. If anything goes wrong before that moment, the site simply keeps running on its previous data and nothing has to be repaired.
+* The site's own settings (address, active plugins, user roles, peer list) are written into the new tables before the switch instead of being restored afterwards, so there is no longer a window in which the site carries the source site's identity.
+* User role definitions are now preserved. Previously they could be lost during an import, which left every account without permissions and the admin area unreachable.
+* Every run keeps a log file that survives a crash. If an import is killed by a memory limit, a time limit or the web server, the log still shows where it was and how much memory it was using.
+* A push now reports a stalled run as stalled. The progress used to be driven by this site's own clock and could show "running" for a long time after the receiving site had stopped responding.
+* If the database cannot do the atomic switch, the import falls back to the previous behaviour and, for that case only, places a short-lived recovery page that can restore the site's own settings without WordPress being able to start.
+* Requires db-engine 1.3.0, which is bundled.
 
 = 0.5.0 =
 * Transfer archives no longer pile up. Every push and every pull used to leave a full copy of the site behind in the backup folder, where nothing ever removed it: on a site synced weekly that is a new multi-hundred-megabyte file every week. Snapshots and push exports now live in the job's working directory and are removed when the job ends.
