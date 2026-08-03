@@ -143,6 +143,8 @@ final class PushOperation implements StageAdvancer
         $status = $this->pollRemoteImport($peer, (string) $job->cursor['remote_job_id']);
         $phase = (string) ($status['phase'] ?? '');
 
+        $this->trackRemoteHeartbeat($job, $status);
+
         if ($phase === SyncStatus::PHASE_DONE) {
             $job->completeStep(SyncStatus::PHASE_IMPORT, __('Remote-Import abgeschlossen', 'rh-sync'));
             $this->cleanupExportWorkdir($job);
@@ -161,8 +163,82 @@ final class PushOperation implements StageAdvancer
             return;
         }
 
-        // Läuft noch: Heartbeat halten, nächster Tick pollt erneut.
-        $job->save();
+        // Läuft noch: Heartbeat halten, nächster Tick pollt erneut. Ob "läuft noch" stimmt,
+        // hat trackRemoteHeartbeat() bereits entschieden.
+        if (!$job->isFinished()) {
+            $job->save();
+        }
+    }
+
+    /**
+     * Wie lange die Zielseite schweigen darf, bevor der Lauf als hängend gilt.
+     *
+     * Grosszügig gewählt: die Gegenseite tickt alle paar Sekunden, ihr eigener Watchdog
+     * darf sie aber auch mal über eine Cron-Runde hinweg wiederbeleben. Fünf Minuten ohne
+     * ein Lebenszeichen sind kein langsamer Import mehr, das ist Stillstand.
+     */
+    private const REMOTE_SILENCE_LIMIT = 300;
+
+    /** Ab hier steht der Hinweis im Fortschritts-Fenster, noch ohne Abbruch. */
+    private const REMOTE_SILENCE_WARN = 90;
+
+    /**
+     * Leitet den Zustand des Laufs aus dem echten Lebenszeichen der Zielseite ab.
+     *
+     * Vorher hat diese Seite bei jedem Tick ihren eigenen Zeitstempel erneuert und damit
+     * "läuft, alles frisch" gemeldet, obwohl sie nur eine tote Gegenstelle abgefragt hat.
+     * Am 2026-08-02 stand hier 45 Minuten lang "läuft" auf dem Schirm, während die Zielseite
+     * seit 17 Sekunden nicht mehr existierte. Genau deshalb wurde so lange gewartet.
+     *
+     * Jetzt zählt nur, ob die Gegenseite ihren Zeitstempel weiterdreht. Tut sie das nicht,
+     * wird das erst sichtbar gemeldet und dann als Fehler beendet.
+     *
+     * @param array<string, mixed> $status Antwort der Gegenseite, leer wenn nicht erreichbar.
+     */
+    private function trackRemoteHeartbeat(JobState $job, array $status): void
+    {
+        $now = time();
+        $remoteUpdate = (int) ($status['last_update_at'] ?? 0);
+        $previous = (int) ($job->cursor['remote_last_update'] ?? 0);
+        $lastProgress = (int) ($job->cursor['remote_progress_at'] ?? $now);
+
+        if ($status !== [] && $remoteUpdate > $previous) {
+            $job->cursor['remote_last_update'] = $remoteUpdate;
+            $job->cursor['remote_progress_at'] = $now;
+            return;
+        }
+
+        // Erstes Schweigen: Startpunkt festhalten, sonst zählt die Stille ab jedem Tick neu.
+        if (!isset($job->cursor['remote_progress_at'])) {
+            $job->cursor['remote_progress_at'] = $now;
+            return;
+        }
+
+        $silence = $now - $lastProgress;
+
+        if ($silence >= self::REMOTE_SILENCE_LIMIT) {
+            JobTrace::write($job->jobId, 'remote_silent', ['seconds' => $silence]);
+            $job->finishFailure(
+                sprintf(
+                    /* translators: %d = Sekunden ohne Lebenszeichen */
+                    __('Die Zielseite meldet sich seit %d Sekunden nicht mehr. Der Import dort ist stehengeblieben. Bitte den Zustand der Zielseite prüfen, bevor erneut gepusht wird.', 'rh-sync'),
+                    $silence
+                ),
+                SyncStatus::PHASE_IMPORT
+            );
+            return;
+        }
+
+        if ($silence >= self::REMOTE_SILENCE_WARN) {
+            $job->updateStepMessage(
+                SyncStatus::PHASE_IMPORT,
+                sprintf(
+                    /* translators: %d = Sekunden ohne Lebenszeichen */
+                    __('Keine Rückmeldung der Zielseite seit %d Sekunden...', 'rh-sync'),
+                    $silence
+                )
+            );
+        }
     }
 
     /**
