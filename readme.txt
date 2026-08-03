@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.6.0
+Stable tag: 0.6.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,12 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.6.1 =
+* Fixes an import that could fail on tables carrying named foreign keys, as used by some plugins. Such tables are now built without their foreign keys, which are re-applied once the new data is live.
+* An import that fails before anything went live now says so plainly instead of warning about a manual restore. Nothing was changed, so there is nothing to restore.
+* Tables left behind by a run that was killed are cleaned up on the next run and by the scheduled check.
+* Requires db-engine 1.3.1, which is bundled.
 
 = 0.6.0 =
 * An interrupted import no longer leaves the receiving site broken. The import now builds its tables alongside the live ones and switches over in a single atomic step at the very end. If anything goes wrong before that moment, the site simply keeps running on its previous data and nothing has to be repaired.
