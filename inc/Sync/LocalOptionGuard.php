@@ -64,6 +64,24 @@ final class LocalOptionGuard
     ];
 
     /**
+     * Options, deren Name den Tabellen-Prefix der Site trägt.
+     *
+     * `{prefix}_user_roles` hält die Rollendefinitionen. Fehlt sie, hat kein einziger
+     * Benutzer mehr Rechte und das Backend antwortet nur noch mit "Du bist leider nicht
+     * berechtigt". Genau das war am 2026-08-02 der Fall: der Import kam nicht bis zur
+     * Umbenennung der Schlüssel, und in der Options-Tabelle stand danach der Name mit dem
+     * Prefix der Quelle.
+     *
+     * Bewusst NICHT in dieser Liste: `template` und `stylesheet`. Das aktive Theme SOLL
+     * mitwandern, sonst bringt ein Sync die Gestaltung nicht mit.
+     *
+     * @var array<int, string>
+     */
+    private const PREFIXED_NAMES = [
+        'user_roles',
+    ];
+
+    /**
      * @return array<int, array{option_name: string, option_value: string, autoload: string}>
      */
     public function snapshot(): array
@@ -95,20 +113,56 @@ final class LocalOptionGuard
     }
 
     /**
+     * Spielt den Snapshot in die LIVE-Options-Tabelle zurück.
+     *
+     * Der Weg des direkten Imports: die Tabelle wurde bereits mit dem Stand der Quelle
+     * überschrieben, und die site-eigenen Werte kommen hinterher wieder rein. Zwischen
+     * beiden Schritten ist die Site falsch verdrahtet. Deshalb ist im Umschalt-Modus
+     * {@see applyTo()} der bessere Weg.
+     *
      * @param array<int, array{option_name: string, option_value: string, autoload: string}> $snapshot
      */
     public function restore(array $snapshot): void
     {
         global $wpdb;
 
+        $this->writeInto((string) $wpdb->options, $snapshot);
+
+        wp_cache_flush();
+    }
+
+    /**
+     * Schreibt den Snapshot in eine noch nicht live geschaltete Options-Tabelle.
+     *
+     * Das ist der eigentliche Fortschritt gegenüber {@see restore()}: die site-eigenen Werte
+     * stehen schon in der Schattentabelle, BEVOR sie live geht. Damit gibt es kein Fenster
+     * mehr, in dem die Zielseite mit der Adresse, den Plugins oder den Rollen der Quelle
+     * dasteht. Nach dem Umschalten ist nichts mehr zu reparieren.
+     *
+     * @param array<int, array{option_name: string, option_value: string, autoload: string}> $snapshot
+     */
+    public function applyTo(string $optionsTable, array $snapshot): void
+    {
+        $this->writeInto($optionsTable, $snapshot);
+    }
+
+    /**
+     * @param array<int, array{option_name: string, option_value: string, autoload: string}> $snapshot
+     */
+    private function writeInto(string $optionsTable, array $snapshot): void
+    {
+        global $wpdb;
+
+        $table = '`' . str_replace('`', '``', $optionsTable) . '`';
         $where = $this->buildWhereClause();
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- direkte Query auf interne Options-Tabelle, WHERE aus festen Konstanten (kein User-Input), Caching bei einmaliger Sync-Operation nicht sinnvoll.
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE {$where}");
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- direkte Query auf die Options-Tabelle, WHERE aus festen Konstanten (kein User-Input).
+        $wpdb->query("DELETE FROM {$table} WHERE {$where}");
 
         foreach ($snapshot as $row) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- $wpdb->insert auf interne Options-Tabelle mit Format-Platzhaltern, Caching bei einmaliger Sync-Operation nicht sinnvoll.
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- $wpdb->insert mit Format-Platzhaltern.
             $wpdb->insert(
-                $wpdb->options,
+                $optionsTable,
                 [
                     'option_name' => $row['option_name'],
                     'option_value' => $row['option_value'],
@@ -117,8 +171,23 @@ final class LocalOptionGuard
                 ['%s', '%s', '%s']
             );
         }
+    }
 
-        wp_cache_flush();
+    /**
+     * Die geschützten Namen inklusive der prefix-behafteten.
+     *
+     * @return array<int, string>
+     */
+    public function protectedNames(): array
+    {
+        global $wpdb;
+
+        $names = self::DEFAULT_NAMES;
+        foreach (self::PREFIXED_NAMES as $suffix) {
+            $names[] = (string) $wpdb->prefix . $suffix;
+        }
+
+        return $names;
     }
 
     private function buildWhereClause(): string
@@ -132,7 +201,7 @@ final class LocalOptionGuard
         /** @var array<int, string> $names */
         $names = (array) apply_filters(
             'rh-blueprint/sync/preserved_option_names',
-            self::DEFAULT_NAMES
+            $this->protectedNames()
         );
 
         $parts = [];
