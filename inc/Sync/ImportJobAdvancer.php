@@ -83,17 +83,110 @@ final class ImportJobAdvancer implements StageAdvancer
             $job->cursor['ij_safety_path'] = $cursor->zipPath;
             $job->completeStep(SyncStatus::PHASE_SAFETY, basename((string) $cursor->zipPath));
 
-            // Site-lokale Options (rhbp_peers, active_plugins, Login-URL, ...) jetzt sichern,
-            // solange die DB noch im Vor-Import-Zustand ist. Nach dem Import wieder einspielen,
-            // damit der Snapshot der Quelle die Identität der Ziel-Site nicht überschreibt.
-            $guard = new LocalOptionGuard();
-            $job->cursor['ij_option_guard'] = $guard->snapshot();
+            // Site-eigene Options (Adresse, aktive Plugins, Rollen, Peer-Liste) jetzt sichern,
+            // solange die Datenbank noch der Zielseite gehört.
+            //
+            // Der Snapshot geht als DATEI weg, nicht in den Job-Cursor. Der Cursor ist eine
+            // Option und liegt damit in genau der Tabelle, die der Import gleich ersetzt: die
+            // Rettungsleine lag bisher in dem Boot, das sinkt. Am 2026-08-02 war sie deshalb
+            // nach dem Absturz nicht mehr auffindbar.
+            $snapshot = (new LocalOptionGuard())->snapshot();
+            $path = (new GuardVault())->store($job->jobId, $snapshot);
+            $job->cursor['ij_guard_file'] = $path;
+
+            JobTrace::write($job->jobId, 'guard_stored', [
+                'file' => basename($path),
+                'options' => count($snapshot),
+            ]);
 
             $job->cursor['ij_phase'] = 'import';
             $job->beginStep(SyncStatus::PHASE_IMPORT, __('Spiele Daten ein...', 'rh-sync'));
         }
 
         $job->save();
+    }
+
+    /**
+     * Der Snapshot der site-eigenen Options, egal woher er kommt.
+     *
+     * Erst die Datei, dann der alte Platz im Cursor. Der Cursor-Zweig deckt Jobs ab, die
+     * noch unter der vorigen Version gestartet sind und mitten im Lauf aktualisiert wurden.
+     *
+     * @return array<int, array{option_name: string, option_value: string, autoload: string}>
+     */
+    private function guardSnapshot(JobState $job): array
+    {
+        $fromFile = (new GuardVault())->load($job->jobId);
+        if (is_array($fromFile) && $fromFile !== []) {
+            return $fromFile;
+        }
+
+        /** @var array<int, array{option_name: string, option_value: string, autoload: string}> $legacy */
+        $legacy = is_array($job->cursor['ij_option_guard'] ?? null) ? $job->cursor['ij_option_guard'] : [];
+
+        return $legacy;
+    }
+
+    /**
+     * Hängt sich in die beiden Momente ein, in denen die db-engine über die Live-Daten entscheidet.
+     *
+     * Schaltet sie atomar um, wandern die site-eigenen Options VOR dem Umschalten in die
+     * Schattentabelle. Damit stimmt die Zielseite in dem Moment, in dem sie umschaltet, und
+     * es gibt kein Fenster mehr, in dem sie mit der Adresse oder den Rollen der Quelle
+     * dasteht. Kann sie es nicht, schreibt der Import direkt in die Live-Tabellen, und
+     * dann wird die Notluke scharf.
+     *
+     * @param array<int, array{option_name: string, option_value: string, autoload: string}> $snapshot
+     * @param bool $applied Wird gesetzt, wenn die Options bereits in der Schattentabelle stehen.
+     */
+    private function hookIntoSwap(JobState $job, array $snapshot, bool &$applied): void
+    {
+        $jobId = $job->jobId;
+
+        add_action(
+            'rh-db-engine/before_table_swap',
+            static function (string $stagePrefix) use ($snapshot, &$applied, $jobId): void {
+                if ($snapshot === []) {
+                    return;
+                }
+                (new LocalOptionGuard())->applyTo($stagePrefix . 'options', $snapshot);
+                $applied = true;
+                JobTrace::write($jobId, 'guard_applied_before_swap', ['options' => count($snapshot)]);
+            },
+            10,
+            1
+        );
+
+        $guardFile = (string) ($job->cursor['ij_guard_file'] ?? '');
+
+        add_action(
+            'rh-db-engine/swap_unavailable',
+            static function (string $reason) use ($jobId, $guardFile): void {
+                JobTrace::write($jobId, 'swap_unavailable', ['reason' => $reason]);
+
+                if ($guardFile === '') {
+                    return;
+                }
+
+                $hatch = (new RecoveryHatch())->arm($jobId, $guardFile);
+                if ($hatch !== null) {
+                    // Nicht in den Job-Cursor: der liegt in der Tabelle, die gleich ersetzt
+                    // wird. Die Adresse steht im Verlaufsprotokoll, das den Absturz überlebt.
+                    JobTrace::write($jobId, 'recovery_url', ['url' => $hatch['url']]);
+                }
+            },
+            10,
+            1
+        );
+    }
+
+    /**
+     * Räumt Rettungsleine und Notluke ab, sobald sie nicht mehr gebraucht werden.
+     */
+    private function standDown(JobState $job): void
+    {
+        (new GuardVault())->clear($job->jobId);
+        (new RecoveryHatch())->disarm();
     }
 
     private function stepImport(JobState $job): void
@@ -106,6 +199,22 @@ final class ImportJobAdvancer implements StageAdvancer
             ? ImportCursor::fromArray($job->cursor['ij_import_cursor'])
             : ImportCursor::start((string) $job->cursor['ij_zip'], $this->storage->jobWorkdir('ij-import-' . $job->jobId));
 
+        $snapshot = $this->guardSnapshot($job);
+        $guardApplied = false;
+        $this->hookIntoSwap($job, $snapshot, $guardApplied);
+
+        JobTrace::context([
+            'stage' => SyncStatus::PHASE_IMPORT,
+            'import_phase' => $cursor->phase,
+            'swap' => $cursor->swapMode,
+            'sql_offset' => $cursor->sqlByteOffset,
+        ]);
+        JobTrace::write($job->jobId, 'import_step_start', [
+            'import_phase' => $cursor->phase,
+            'swap' => $cursor->swapMode,
+            'sql_offset' => $cursor->sqlByteOffset,
+        ]);
+
         try {
             $cursor = $this->importer->importStep(
                 $cursor,
@@ -114,6 +223,10 @@ final class ImportJobAdvancer implements StageAdvancer
                 $profile->uploads
             );
         } catch (\Throwable $e) {
+            JobTrace::write($job->jobId, 'import_failed', [
+                'import_phase' => $cursor->phase,
+                'message' => $e->getMessage(),
+            ]);
             // Importfehler NICHT werfen: in den Rollback überführen (Safety-Backup ist da).
             $job->cursor['ij_error'] = $e->getMessage();
             $job->cursor['ij_phase'] = 'rollback';
@@ -124,13 +237,22 @@ final class ImportJobAdvancer implements StageAdvancer
         $job->cursor['ij_import_cursor'] = $cursor->toArray();
         $job->setProgress($cursor->sqlByteOffset, 0);
 
+        JobTrace::write($job->jobId, 'import_step_end', [
+            'import_phase' => $cursor->phase,
+            'sql_offset' => $cursor->sqlByteOffset,
+            'tables' => count($cursor->createdTables),
+        ]);
+
         if ($cursor->isDone()) {
             $job->importCommitted = true;
 
-            // Gesicherte site-lokale Options wiederherstellen (der Import hat sie mit dem
-            // Quell-Stand überschrieben).
-            if (isset($job->cursor['ij_option_guard']) && is_array($job->cursor['ij_option_guard'])) {
-                (new LocalOptionGuard())->restore($job->cursor['ij_option_guard']);
+            // Beim atomaren Umschalten standen die site-eigenen Options schon in der
+            // Schattentabelle, bevor sie live ging. Dann gibt es hier nichts mehr zu
+            // reparieren. Nur auf dem direkten Weg muss nachträglich zurückgeschrieben
+            // werden, und genau dieses Fenster ist das Risiko.
+            if (!$guardApplied && $snapshot !== []) {
+                (new LocalOptionGuard())->restore($snapshot);
+                JobTrace::write($job->jobId, 'guard_restored_after_import', ['options' => count($snapshot)]);
             }
 
             // Bei users-Pull: die Session des auslösenden Admins wiederherstellen (kein Logout).
@@ -141,6 +263,8 @@ final class ImportJobAdvancer implements StageAdvancer
 
             $job->completeStep(SyncStatus::PHASE_IMPORT, __('Import abgeschlossen', 'rh-sync'));
             $this->cleanupWorkdirs($job);
+            $this->standDown($job);
+            JobTrace::write($job->jobId, 'import_done', ['swap' => $cursor->swapMode]);
             $job->finishSuccess([
                 'safety_backup_path' => $job->cursor['ij_safety_path'] ?? null,
                 'profile' => $job->profile,
@@ -158,6 +282,8 @@ final class ImportJobAdvancer implements StageAdvancer
 
         if ($safety === '' || !is_readable($safety)) {
             $this->cleanupWorkdirs($job);
+            // Die Notluke bleibt hier bewusst offen: ohne Sicherungskopie ist sie das
+            // einzige, was die Zielseite noch geradebiegen kann.
             $job->finishFailure(
                 sprintf('Import fehlgeschlagen (%s) und kein Safety-Backup zum Zurückspielen vorhanden.', $error),
                 SyncStatus::PHASE_IMPORT
@@ -186,6 +312,9 @@ final class ImportJobAdvancer implements StageAdvancer
 
         if ($cursor->isDone()) {
             $this->cleanupWorkdirs($job);
+            // Der Vor-Zustand steht wieder, damit ist die Notluke überflüssig.
+            $this->standDown($job);
+            JobTrace::write($job->jobId, 'rollback_done', []);
             $job->finishFailure(
                 sprintf('Import fehlgeschlagen: %s. Das Sicherheits-Backup wurde zurückgespielt.', $error),
                 SyncStatus::PHASE_IMPORT,
