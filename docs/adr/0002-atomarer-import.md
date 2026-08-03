@@ -73,8 +73,50 @@ einen kaputten Zwischenzustand führt.
 - **Medien sind nicht atomar** und können es nicht sein. Sie laufen nach dem Umschalten.
   Ein Abbruch dort lässt eine funktionierende Site mit noch fehlenden Bildern zurück, nicht
   eine kaputte.
-- **Fremdschlüssel und Views** über Tabellengrenzen hinweg sind bei WordPress unüblich und
-  nicht abgedeckt.
+- **Views** über Tabellengrenzen hinweg sind bei WordPress unüblich und nicht abgedeckt.
+
+## Nachtrag 2026-08-03, Fremdschlüssel
+
+Der erste Produktivlauf blieb genau daran hängen:
+
+```
+Can't create table `…`.`rhstg_defender_quarantine` (errno: 121 "Duplicate key on write or update")
+```
+
+InnoDB verlangt Constraint-Namen **datenbankweit** eindeutig, nicht pro Tabelle. Beim Anlegen
+der Schattentabelle wanderte nur der Tabellenname auf den Zwischen-Prefix, der Constraint-Name
+blieb, und die Originaltabelle hielt ihn noch. Dazu zeigten die Verweise weiter auf die
+Live-Tabellen statt auf die Schattentabellen.
+
+**Entscheidung: Fremdschlüssel werden beim Anlegen abgetrennt und nach dem Umschalten gesetzt.**
+Nicht: Constraint-Namen mit auf den Zwischen-Prefix umschreiben.
+
+Gegen das Umschreiben sprechen drei Dinge:
+
+1. **Der Name bliebe kleben.** Ein auf `rhstg_` umbenannter Constraint behält diesen Namen,
+   wenn die Tabelle live geht. Der nächste Import erzeugt denselben Namen erneut und läuft in
+   dieselbe Kollision. Ein Umbenennen beim Umschalten bräuchte `ALTER TABLE … RENAME CONSTRAINT`,
+   das gibt es erst ab MySQL 8.0.28 und in MariaDB gar nicht.
+2. **Das Umschalten würde komplizierter.** Ein `RENAME TABLE` über einen Satz Tabellen, die
+   sich gegenseitig per Fremdschlüssel referenzieren, zwingt InnoDB zur Buchhaltung mitten in
+   der Anweisung, auf die es beim atomaren Umschalten gerade ankommt. Ohne Fremdschlüssel in
+   den Schattentabellen fällt das ersatzlos weg.
+3. **Die Verweise stimmen von selbst.** Nachträglich gesetzt, zeigt jeder Fremdschlüssel auf
+   die Live-Tabelle, ohne dass irgendetwas umgerechnet werden muss.
+
+Der Preis: zwischen Umschalten und Setzen der Fremdschlüssel fehlen die Constraints kurz, und
+wenn der Lauf dort stirbt, fehlen sie ganz. Beides ist folgenlos für den Betrieb, ein
+Fremdschlüssel ist eine Integritätsregel und kein Inhalt. Deshalb bricht ein Fremdschlüssel,
+der sich nicht setzen lässt, den Import auch nicht ab: er wird gezählt und über
+`rh-db-engine/import_incomplete_constraints` gemeldet.
+
+**Constraint-Namen werden bewusst NICHT normalisiert.** Der ursprüngliche Name wird
+wiederhergestellt (nur ein führender Quell-Prefix wandert auf den Ziel-Prefix). Namen, die
+den Prefix einer dritten Site tragen, sind Altlast aus einem früheren Import und bleiben,
+wie sie sind: sie lassen sich nicht zuverlässig als solche erkennen, und ein Plugin, das
+seinen Constraint beim Namen sucht, würde ein Umbenennen nicht überstehen. Gegen Kollisionen
+hilft ohnehin nicht der Name, sondern dass die alte Tabelle vorher entfernt wurde. Bleibt der
+Name dennoch belegt, greift ein abgeleiteter Ersatzname.
 
 ## Was bleibt für den Rückfallweg
 
