@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.7.0
+Stable tag: 0.7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,9 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.7.1 =
+* Same content as 0.7.0, released under a new number. A build carrying the version 0.7.0 had already been installed on some sites before that version was published, so those sites were never offered the update. If you are on 0.7.0, this is the release you want.
 
 = 0.7.0 =
 * A sync no longer carries its own pairing to the other side. Peer list, history and running jobs describe the site they belong to, so they stay there. Previously a pull could leave the target with the source's peer list, pointing the connection at the wrong site.
