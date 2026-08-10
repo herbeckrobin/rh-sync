@@ -35,7 +35,8 @@ final class PeerUrl
 {
     /**
      * Prüft eine Peer-URL. Liefert `null` wenn ok, sonst einen Fehler-Code für die
-     * Redirect-Message-Map ('peer_insecure_url' | 'peer_blocked_host' | 'peer_invalid_url').
+     * Redirect-Message-Map ('peer_insecure_url' | 'peer_blocked_host' | 'peer_invalid_url'
+     * | 'peer_is_self').
      */
     public static function validate(string $url, bool $userConfirmedInsecure = false): ?string
     {
@@ -44,6 +45,10 @@ final class PeerUrl
 
         if ($host === '' || ($scheme !== 'http' && $scheme !== 'https')) {
             return 'peer_invalid_url';
+        }
+
+        if (self::isSelf($url)) {
+            return 'peer_is_self';
         }
 
         // SSRF bleibt hart, auch wenn der Admin http bewusst bestätigt hat.
@@ -56,6 +61,62 @@ final class PeerUrl
         }
 
         return null;
+    }
+
+    /**
+     * Zeigt diese Adresse auf die Website, die gerade gefragt wird?
+     *
+     * Ein Peer auf sich selbst ist keine Kopplung, sondern eine Schleife: der Sync zieht
+     * die eigenen Daten und spielt sie sich wieder ein. Vor allem tarnt sich der Fehler,
+     * wenn er unbemerkt entsteht. Am 2026-08-10 stand nach einem Import die Adresse der
+     * eigenen Website in der Peer-Liste, und der nächste Lauf meldete daraufhin ein
+     * Zertifikatsproblem, weil der Server sich selbst anrief. Zwei Stunden Suche an der
+     * völlig falschen Stelle, die dieser Satz erspart hätte.
+     *
+     * Verglichen wird Host und Pfad, nicht das Schema: ob http oder https davorsteht,
+     * ändert nichts daran, dass es dieselbe Website ist. Ein führendes `www.` fällt weg,
+     * weil beide Schreibweisen in der Praxis dieselbe Installation meinen.
+     */
+    public static function isSelf(string $url): bool
+    {
+        $eigene = [home_url(), site_url()];
+
+        $kandidat = self::identity($url);
+        if ($kandidat === null) {
+            return false;
+        }
+
+        foreach ($eigene as $eigen) {
+            if (self::identity((string) $eigen) === $kandidat) {
+                /**
+                 * Erlaubt eine Kopplung mit der eigenen Website. Default: aus. Der
+                 * Selbsttest auf der Kommandozeile legt seine Kopplung direkt an und
+                 * braucht diesen Filter nicht.
+                 */
+                return ! (bool) apply_filters('rh-blueprint/sync/allow_self_peer', false, $url);
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Host und Pfad in vergleichbarer Form, oder null wenn die Adresse unbrauchbar ist.
+     */
+    private static function identity(string $url): ?string
+    {
+        $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+        if ($host === '') {
+            return null;
+        }
+
+        if (str_starts_with($host, 'www.')) {
+            $host = substr($host, 4);
+        }
+
+        $path = rtrim((string) wp_parse_url($url, PHP_URL_PATH), '/');
+
+        return $host . $path;
     }
 
     /**

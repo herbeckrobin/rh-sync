@@ -68,7 +68,10 @@ final class PushOperation implements StageAdvancer
                 $workdir,
                 $profile->uploads,
                 SyncDefaults::excludedTables(),
-                $workdir
+                $workdir,
+                // Die eigene Kopplung und der eigene Verlauf bleiben hier. Auf der
+                // Zielseite würden sie deren Kopplung überschreiben.
+                LocalOptionGuard::engineOptions()
             );
         } else {
             $cursor = ExportCursor::fromArray($job->cursor['ex_cursor']);
@@ -148,11 +151,26 @@ final class PushOperation implements StageAdvancer
         if ($phase === SyncStatus::PHASE_DONE) {
             $job->completeStep(SyncStatus::PHASE_IMPORT, __('Remote-Import abgeschlossen', 'rh-sync'));
             $this->cleanupExportWorkdir($job);
-            $job->finishSuccess([
+
+            // Was die Zielseite über die wiederhergestellten Termine zu sagen hat, entsteht
+            // dort und ist hier nur durchzureichen: gemeldet wird auf der Seite, die den
+            // Push ausgelöst hat.
+            $remote = is_array($status['summary'] ?? null) ? $status['summary'] : [];
+
+            $summary = [
                 'bytes' => (int) ($job->cursor['total_size'] ?? 0),
                 'remote_job_id' => $job->cursor['remote_job_id'],
                 'profile' => $job->profile,
-            ]);
+                'schedule_rebuild' => is_array($remote['schedule_rebuild'] ?? null)
+                    ? $remote['schedule_rebuild']
+                    : null,
+            ];
+
+            if (is_array($remote['notes'] ?? null) && $remote['notes'] !== []) {
+                $summary['notes'] = $remote['notes'];
+            }
+
+            $job->finishSuccess($summary);
             return;
         }
 
@@ -344,7 +362,8 @@ final class PushOperation implements StageAdvancer
             $localZip = $this->exporter->createBackup(
                 $effectiveProfile->uploads,
                 SyncDefaults::excludedTables(),
-                $this->storage->jobWorkdir('push-legacy-' . $jobId)
+                $this->storage->jobWorkdir('push-legacy-' . $jobId),
+                LocalOptionGuard::engineOptions()
             );
             $totalSize = (int) filesize($localZip);
             $phaseTimings['export'] = (int) ((microtime(true) - $phaseStart) * 1000);

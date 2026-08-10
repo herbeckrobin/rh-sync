@@ -12,6 +12,7 @@ use RhSync\Sync\PeerUrl;
 use RhSync\Sync\Preflight;
 use RhSync\Sync\PullOperation;
 use RhSync\Sync\PushOperation;
+use RhSync\Sync\ScheduleReport;
 use RhSync\Sync\SessionGuard;
 use RhSync\Sync\SyncClient;
 use RhSync\Sync\SyncLog;
@@ -91,6 +92,7 @@ final class SyncPeersPage
             'peer_invalid_url' => ['error', __('Die URL ist nicht gültig.', 'rh-sync')],
             'peer_insecure_url' => ['error', __('Peer-URLs müssen HTTPS verwenden. Über HTTP würden Sync-Daten im Klartext übertragen.', 'rh-sync')],
             'peer_blocked_host' => ['error', __('Diese URL zeigt auf eine interne oder lokale Adresse und ist als Sync-Ziel nicht erlaubt.', 'rh-sync')],
+            'peer_is_self' => ['error', __('Diese Adresse ist diese Website. Eine Verbindung braucht zwei Seiten: trage die Adresse der anderen Website ein. Steht hier die eigene, stammt der Code vermutlich von dieser Seite statt von der Gegenseite.', 'rh-sync')],
             'peer_name_exists' => ['error', __('Ein Peer mit diesem Namen existiert bereits.', 'rh-sync')],
             'peer_not_found' => ['error', __('Peer nicht gefunden.', 'rh-sync')],
             'peer_invalid_pairing' => ['error', __('Pairing-Code ungültig oder beschädigt.', 'rh-sync')],
@@ -1384,13 +1386,28 @@ final class SyncPeersPage
                 $profileSummary = $p->isFullSync() ? __('Voll', 'rh-sync') : sprintf(__('%d von 8', 'rh-sync'), $p->activeCount());
             }
 
-            $hasDetails = $profileData !== null || $manifest !== null || $safetyBackup !== '' || $error !== '';
+            // `null` heißt "nicht geprüft", ein leerer Bericht heißt "geprüft, nichts zu tun".
+            // Beides muss unterscheidbar bleiben, sonst liest sich ein Ausfall wie ein sauberer Lauf.
+            $schedule = isset($entry['schedule']) && is_array($entry['schedule'])
+                ? ScheduleReport::fromArray($entry['schedule'])
+                : null;
+            $schedulePill = $schedule?->pill();
+
+            $hasDetails = $profileData !== null
+                || $manifest !== null
+                || $safetyBackup !== ''
+                || $error !== ''
+                || ($schedule !== null && !$schedule->isEmpty());
 
             echo '<tr class="rhbp-history-row" data-history-row="' . esc_attr($rowId) . '">';
             echo '<td>' . esc_html(wp_date('Y-m-d H:i', $timestamp)) . '</td>';
             echo '<td><strong>' . esc_html($peerName) . '</strong></td>';
             echo '<td><span class="rhbp-pill rhbp-pill--accent">' . esc_html($direction) . '</span></td>';
-            echo '<td><span class="rhbp-pill ' . ($statusClass === 'ok' ? 'rhbp-pill--ok' : 'rhbp-pill--err') . '">' . esc_html($status) . '</span></td>';
+            echo '<td><span class="rhbp-pill ' . ($statusClass === 'ok' ? 'rhbp-pill--ok' : 'rhbp-pill--err') . '">' . esc_html($status) . '</span>';
+            if ($schedulePill !== null) {
+                echo ' <span class="rhbp-pill rhbp-pill--' . esc_attr($schedulePill['tone']) . '">' . esc_html($schedulePill['text']) . '</span>';
+            }
+            echo '</td>';
             echo '<td>' . esc_html($bytes > 0 ? (size_format($bytes, 2) ?: $bytes . ' B') : ', ') . '</td>';
             echo '<td>' . esc_html($durationMs > 0 ? $durationMs . ' ms' : ', ') . '</td>';
             echo '<td>' . esc_html($profileSummary !== '' ? $profileSummary : ', ') . '</td>';
@@ -1456,6 +1473,21 @@ final class SyncPeersPage
                     echo '<div class="rhbp-history-detail__block">';
                     echo '<h5>' . esc_html__('Sicherheits-Backup', 'rh-sync') . '</h5>';
                     echo '<code class="rhbp-history-safety">' . esc_html(basename($safetyBackup)) . '</code>';
+                    echo '</div>';
+                }
+
+                if ($schedule !== null && !$schedule->isEmpty()) {
+                    echo '<div class="rhbp-history-detail__block">';
+                    echo '<h5>' . esc_html__('Geplante Beiträge', 'rh-sync') . '</h5>';
+                    echo '<p>' . esc_html($schedule->headline()) . '</p>';
+                    $lines = $schedule->lines();
+                    if ($lines !== []) {
+                        echo '<ul class="rhbp-history-schedule-list">';
+                        foreach ($lines as $line) {
+                            echo '<li>' . esc_html($line) . '</li>';
+                        }
+                        echo '</ul>';
+                    }
                     echo '</div>';
                 }
 
@@ -1687,6 +1719,10 @@ final class SyncPeersPage
         echo '<h3>' . esc_html__('Sicherheits-Backup', 'rh-sync') . '</h3>';
         echo '<code data-success-safety></code>';
         echo '</div>';
+        // Platz für Meldungen aus Nachläufen, die nach dem eigentlichen Einspielen laufen
+        // (aktuell die wiederhergestellten Termine). Bewusst ohne eigene Überschrift: die
+        // bringt jede Meldung selbst mit, damit hier kein Modul-Wissen verdrahtet ist.
+        echo '<div data-summary-notes></div>';
         echo '</div>';
 
         // Error-State

@@ -233,7 +233,10 @@ final class SyncController
             $zipPath = $this->exporter->createBackup(
                 $includeUploads,
                 SyncDefaults::excludedTables(),
-                $this->storage->jobWorkdir('snapshot-' . wp_generate_password(12, false, false))
+                $this->storage->jobWorkdir('snapshot-' . wp_generate_password(12, false, false)),
+                // Was diese Website mit anderen koppelt, gehört niemandem sonst. Es bleibt
+                // hier, statt auf der Gegenseite deren eigene Kopplung zu überschreiben.
+                LocalOptionGuard::engineOptions()
             );
         } catch (\Throwable $e) {
             return new WP_Error(

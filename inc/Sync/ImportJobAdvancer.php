@@ -21,9 +21,10 @@ use RhDbEngine\Storage;
  * Erwartet im Job-Cursor: `ij_zip` = absoluter Pfad zum zu importierenden ZIP.
  *
  * Phasen (je ein Sub-Step pro Tick, jeweils selbst resume-fähig):
- *   safety  -> Sicherheits-Backup des aktuellen Zustands (exportStep)
- *   import  -> Snapshot einspielen (importStep, gefiltert nach Profil)
- *   rollback-> bei Importfehler das Safety-Backup zurückspielen, dann sauber als failed enden
+ *   safety   -> Sicherheits-Backup des aktuellen Zustands (exportStep)
+ *   import   -> Snapshot einspielen (importStep, gefiltert nach Profil)
+ *   aftercare-> Termine wiederherstellen, die an Inhalten hängen (ScheduleRebuilder)
+ *   rollback -> bei Importfehler das Safety-Backup zurückspielen, dann sauber als failed enden
  */
 final class ImportJobAdvancer implements StageAdvancer
 {
@@ -42,6 +43,7 @@ final class ImportJobAdvancer implements StageAdvancer
             '' => $this->init($job),
             'safety' => $this->stepSafety($job),
             'import' => $this->stepImport($job),
+            'aftercare' => $this->stepAftercare($job),
             'rollback' => $this->stepRollback($job),
             default => $job->finishFailure('Unbekannte Import-Phase: ' . $phase, SyncStatus::PHASE_IMPORT),
         };
@@ -146,10 +148,22 @@ final class ImportJobAdvancer implements StageAdvancer
         add_action(
             'rh-db-engine/before_table_swap',
             static function (string $stagePrefix) use ($snapshot, &$applied, $jobId): void {
-                if ($snapshot === []) {
+                if ($snapshot === [] || $applied) {
                     return;
                 }
-                (new LocalOptionGuard())->applyTo($stagePrefix . 'options', $snapshot);
+
+                try {
+                    (new LocalOptionGuard())->applyTo($stagePrefix . 'options', $snapshot);
+                } catch (\Throwable $e) {
+                    // Nicht umschalten. Die Zielseite behält ihre Daten, und der Import
+                    // endet gleich als Fehlschlag, ohne die Live-Tabellen berührt zu haben.
+                    JobTrace::write($jobId, 'guard_failed_before_swap', [
+                        'options' => count($snapshot),
+                        'message' => $e->getMessage(),
+                    ]);
+                    throw $e;
+                }
+
                 $applied = true;
                 JobTrace::write($jobId, 'guard_applied_before_swap', ['options' => count($snapshot)]);
             },
@@ -205,7 +219,13 @@ final class ImportJobAdvancer implements StageAdvancer
             ? ImportCursor::fromArray($job->cursor['ij_import_cursor'])
             : ImportCursor::start((string) $job->cursor['ij_zip'], $this->storage->jobWorkdir('ij-import-' . $job->jobId));
 
-        $snapshot = $this->guardSnapshot($job);
+        // Der Schutz der site-eigenen Options ist nur nötig, wenn der Import die Options-Tabelle
+        // überhaupt anfasst. Bei einem Profil ohne "Einstellungen" gibt es weder eine
+        // Schattentabelle, in die er schreiben könnte, noch etwas zu reparieren: die Live-Tabelle
+        // bleibt unberührt. Ohne diese Prüfung schreibt der Guard ins Leere, das Log füllt sich
+        // mit "Table rhstg_options doesn't exist", und am Ende ginge ein überflüssiges
+        // DELETE + INSERT über die echte Options-Tabelle.
+        $snapshot = $profile->options ? $this->guardSnapshot($job) : [];
         $guardApplied = false;
         $this->hookIntoSwap($job, $snapshot, $guardApplied);
 
@@ -279,7 +299,32 @@ final class ImportJobAdvancer implements StageAdvancer
             // reparieren. Nur auf dem direkten Weg muss nachträglich zurückgeschrieben
             // werden, und genau dieses Fenster ist das Risiko.
             if (!$guardApplied && $snapshot !== []) {
-                (new LocalOptionGuard())->restore($snapshot);
+                try {
+                    (new LocalOptionGuard())->restore($snapshot);
+                } catch (\Throwable $e) {
+                    // Hier sind die neuen Daten schon live. Greift der Schutz jetzt nicht,
+                    // steht die Zielseite mit der Adresse, den Plugins und der Kopplung der
+                    // Quelle da. Das darf nicht als Erfolg durchgehen, und die Rettungsleine
+                    // bleibt liegen, damit sich der Zustand von Hand richten lässt.
+                    JobTrace::write($job->jobId, 'guard_failed_after_import', [
+                        'options' => count($snapshot),
+                        'message' => $e->getMessage(),
+                    ]);
+
+                    $job->finishFailure(
+                        sprintf(
+                            /* translators: %1$s = Fehlermeldung, %2$s = Pfad zum Options-Snapshot */
+                            __('Die Daten sind eingespielt, aber die site-eigenen Einstellungen konnten nicht zurückgeschrieben werden: %1$s. Diese Website trägt jetzt möglicherweise Adresse, Plugin-Liste und Kopplung der Quelle. Der Stand von vorher liegt in %2$s.', 'rh-sync'),
+                            $e->getMessage(),
+                            (string) ($job->cursor['ij_guard_file'] ?? '(nicht abgelegt)')
+                        ),
+                        SyncStatus::PHASE_IMPORT,
+                        (string) ($job->cursor['ij_safety_path'] ?? '')
+                    );
+
+                    return;
+                }
+
                 JobTrace::write($job->jobId, 'guard_restored_after_import', ['options' => count($snapshot)]);
             }
 
@@ -289,18 +334,107 @@ final class ImportJobAdvancer implements StageAdvancer
                 (new SessionGuard())->restore($job->cursor['session_guard']);
             }
 
-            $job->completeStep(SyncStatus::PHASE_IMPORT, __('Import abgeschlossen', 'rh-sync'));
-            $this->cleanupWorkdirs($job);
-            $this->standDown($job);
-            JobTrace::write($job->jobId, 'import_done', ['swap' => $cursor->swapMode]);
-            $job->finishSuccess([
-                'safety_backup_path' => $job->cursor['ij_safety_path'] ?? null,
-                'profile' => $job->profile,
-            ]);
+            // Die Daten stehen. Was jetzt noch fehlt, sind die Termine, die an ihnen hängen:
+            // die Option `cron` bleibt beim Import ziel-lokal, also kommen die Beiträge ohne
+            // ihre Wecker an. Das ist ein eigener Schritt mit eigenem Zeitbudget, weil jeder
+            // gesetzte Termin ein Schreibvorgang auf eine wachsende Option ist.
+            $job->cursor['ij_swap_mode'] = $cursor->swapMode;
+            // Welche der ausgelassenen Tabellen die Quelle benutzt. Der Import-Cursor wird
+            // gleich weggeräumt, der Nachlauf braucht die Angabe aber noch.
+            $job->cursor['ij_source_tables'] = is_array($cursor->manifest['excluded_tables_present'] ?? null)
+                ? array_map('strval', $cursor->manifest['excluded_tables_present'])
+                : [];
+            $job->cursor['ij_phase'] = 'aftercare';
+            $job->cursor['ij_aftercare'] = ScheduleRebuilder::start($profile->options);
+            $job->updateStepMessage(
+                SyncStatus::PHASE_IMPORT,
+                __('Stelle Veröffentlichungs-Termine wieder her...', 'rh-sync')
+            );
+            $job->save();
             return;
         }
 
         $job->save();
+    }
+
+    /**
+     * Nachlauf: die Termine wiederherstellen, die an den importierten Inhalten hängen.
+     *
+     * Alles hier liegt in einem Auffangnetz. Die Daten stehen zu diesem Zeitpunkt bereits
+     * live, der Import ist gewonnen. Ein Nachlauf, der stolpert, darf ihn nicht nachträglich
+     * zum Fehlschlag machen: dann eben ohne Bericht, aber mit einer Zeile im Verlaufsprotokoll.
+     */
+    private function stepAftercare(JobState $job): void
+    {
+        $report = null;
+
+        try {
+            /** @var array<string, mixed> $state */
+            $state = is_array($job->cursor['ij_aftercare'] ?? null)
+                ? $job->cursor['ij_aftercare']
+                : ScheduleRebuilder::start();
+
+            // Der Nachlauf bekommt höchstens zehn Sekunden pro Durchgang, auch wenn der Job
+            // mehr dürfte. Er ist Kür, nicht Pflicht, und soll den Abschluss nicht aufhalten.
+            $deadline = microtime(true) + min($job->tickBudget, 10.0);
+
+            $state = (new ScheduleRebuilder())->step($state, $deadline);
+            $job->cursor['ij_aftercare'] = $state;
+
+            if (!ScheduleRebuilder::isDone($state)) {
+                $job->save();
+                return;
+            }
+
+            $report = ScheduleRebuilder::report($state);
+            JobTrace::write($job->jobId, 'schedule_rebuilt', $report->toArray());
+        } catch (\Throwable $e) {
+            JobTrace::write($job->jobId, 'aftercare_failed', ['message' => $e->getMessage()]);
+        }
+
+        $job->completeStep(SyncStatus::PHASE_IMPORT, __('Import abgeschlossen', 'rh-sync'));
+        $this->cleanupWorkdirs($job);
+        $this->standDown($job);
+        JobTrace::write($job->jobId, 'import_done', [
+            'swap' => $job->cursor['ij_swap_mode'] ?? null,
+        ]);
+
+        // Tabellen, die die Quelle benutzt und die es hier noch nie gab, fehlen nach dem
+        // Import einfach. Das meldet niemand sonst, WordPress läuft dann mit einem
+        // Datenbankfehler pro Aufruf weiter.
+        $fehlendeTabellen = [];
+        try {
+            /** @var array<int, string> $aufDerQuelle */
+            $aufDerQuelle = is_array($job->cursor['ij_source_tables'] ?? null) ? $job->cursor['ij_source_tables'] : [];
+            $fehlendeTabellen = (new MissingTables())->detect($aufDerQuelle);
+            if ($fehlendeTabellen !== []) {
+                JobTrace::write($job->jobId, 'tables_missing', ['tables' => $fehlendeTabellen]);
+            }
+        } catch (\Throwable $e) {
+            JobTrace::write($job->jobId, 'table_check_failed', ['message' => $e->getMessage()]);
+        }
+
+        $summary = [
+            'safety_backup_path' => $job->cursor['ij_safety_path'] ?? null,
+            'profile' => $job->profile,
+            'schedule_rebuild' => $report?->toArray(),
+            'missing_tables' => $fehlendeTabellen,
+        ];
+
+        $notes = [];
+        $note = $report?->note();
+        if ($note !== null) {
+            $notes[] = $note;
+        }
+        $tabellenHinweis = (new MissingTables())->note($fehlendeTabellen);
+        if ($tabellenHinweis !== null) {
+            $notes[] = $tabellenHinweis;
+        }
+        if ($notes !== []) {
+            $summary['notes'] = $notes;
+        }
+
+        $job->finishSuccess($summary);
     }
 
     private function stepRollback(JobState $job): void

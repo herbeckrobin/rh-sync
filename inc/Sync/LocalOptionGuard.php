@@ -26,6 +26,16 @@ namespace RhSync\Sync;
  * Credentials die pro Umgebung verschluesselt sind):
  *   - `rh-blueprint/sync/preserved_option_patterns`, SQL-LIKE-Patterns
  *   - `rh-blueprint/sync/preserved_option_names`   , exakte option_names
+ *
+ * Jeder Schreibvorgang wird geprüft und danach zurückgelesen. Am 2026-08-10 hat der
+ * Schutz auf einer Kundeninstallation dreimal Erfolg gemeldet und trotzdem die
+ * Peer-Liste, die aktiven Plugins und die Rollen der Quelle stehen lassen. Ein Schutz,
+ * der sein eigenes Ergebnis nicht prüft, ist keiner: lieber ein Import, der laut
+ * abbricht, als eine Site, die falsch verdrahtet weiterläuft.
+ *
+ * Zweite Verteidigungslinie ist der Export: was die Sync-Engine selbst ausmacht
+ * ({@see engineOptions()}), nimmt die Quelle gar nicht erst mit ins Archiv. Beide Enden
+ * lesen dieselbe Liste, damit sie nicht auseinanderlaufen.
  */
 final class LocalOptionGuard
 {
@@ -80,6 +90,31 @@ final class LocalOptionGuard
     private const PREFIXED_NAMES = [
         'user_roles',
     ];
+
+    /**
+     * Die Schlüssel, die die Sync-Engine selbst ausmachen.
+     *
+     * Sie beschreiben die Instanz, auf der sie entstanden sind: mit wem sie gekoppelt ist,
+     * welche Läufe sie hinter sich hat, was gerade läuft. Auf der Gegenseite sind sie
+     * bestenfalls irreführend und schlimmstenfalls zerstörerisch, denn eine übernommene
+     * Peer-Liste zeigt auf die falsche Website. Deshalb reisen sie gar nicht erst mit.
+     *
+     * Format wie in {@see \RhDbEngine\ExportCursor::optionExcluded()}: Stern am Ende meint
+     * Anfang, sonst genauer Name.
+     *
+     * @return array<int, string>
+     */
+    public static function engineOptions(): array
+    {
+        return [
+            PeerRegistry::OPTION_NAME,
+            'rhbp_sync_*',
+            '_transient_rhbp_sync_*',
+            '_transient_timeout_rhbp_sync_*',
+            '_site_transient_rhbp_sync_*',
+            '_site_transient_timeout_rhbp_sync_*',
+        ];
+    }
 
     /**
      * @return array<int, array{option_name: string, option_value: string, autoload: string}>
@@ -147,21 +182,40 @@ final class LocalOptionGuard
     }
 
     /**
+     * Schreibt den Snapshot in eine Options-Tabelle und prüft danach, ob er dort steht.
+     *
+     * Jeder einzelne Schritt wird ausgewertet, und am Ende wird zurückgelesen. Ohne diese
+     * Prüfung meldet der Schutz auch dann Erfolg, wenn kein einziger Wert angekommen ist:
+     * `$wpdb->query()` und `$wpdb->insert()` geben im Fehlerfall `false` zurück, sie werfen
+     * nichts. Genau daran ist der Schutz am 2026-08-10 unbemerkt vorbeigelaufen.
+     *
      * @param array<int, array{option_name: string, option_value: string, autoload: string}> $snapshot
+     * @throws \RuntimeException wenn geschrieben wurde, aber nicht das Erwartete dasteht.
      */
     private function writeInto(string $optionsTable, array $snapshot): void
     {
         global $wpdb;
 
+        if ($snapshot === []) {
+            return;
+        }
+
         $table = '`' . str_replace('`', '``', $optionsTable) . '`';
         $where = $this->buildWhereClause();
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- direkte Query auf die Options-Tabelle, WHERE aus festen Konstanten (kein User-Input).
-        $wpdb->query("DELETE FROM {$table} WHERE {$where}");
+        $geloescht = $wpdb->query("DELETE FROM {$table} WHERE {$where}");
+        if ($geloescht === false) {
+            throw new \RuntimeException(sprintf(
+                'Die site-eigenen Options liessen sich in %s nicht ersetzen: %s',
+                $optionsTable,
+                $this->lastError()
+            ));
+        }
 
         foreach ($snapshot as $row) {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- $wpdb->insert mit Format-Platzhaltern.
-            $wpdb->insert(
+            $ok = $wpdb->insert(
                 $optionsTable,
                 [
                     'option_name' => $row['option_name'],
@@ -170,7 +224,77 @@ final class LocalOptionGuard
                 ],
                 ['%s', '%s', '%s']
             );
+
+            if ($ok === false) {
+                throw new \RuntimeException(sprintf(
+                    'Die site-eigene Option %s liess sich in %s nicht schreiben: %s',
+                    $row['option_name'],
+                    $optionsTable,
+                    $this->lastError()
+                ));
+            }
         }
+
+        $this->verify($optionsTable, $snapshot);
+    }
+
+    /**
+     * Liest zurück, was gerade geschrieben wurde.
+     *
+     * Das ist der eigentliche Beweis. Ein Schreibvorgang, der `true` zurückgibt, sagt nur,
+     * dass die Datenbank die Anweisung angenommen hat, nicht dass danach das Richtige
+     * dasteht: die Tabelle kann eine andere sein als gedacht, ein späterer Schritt kann
+     * darüberschreiben. Verglichen wird der Wert selbst, nicht die Anzahl der Zeilen.
+     *
+     * @param array<int, array{option_name: string, option_value: string, autoload: string}> $snapshot
+     * @throws \RuntimeException
+     */
+    private function verify(string $optionsTable, array $snapshot): void
+    {
+        global $wpdb;
+
+        $table = '`' . str_replace('`', '``', $optionsTable) . '`';
+
+        $ist = [];
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- direkte Query auf die Options-Tabelle, Tabellenname aus dem Import-Cursor.
+        $rows = $wpdb->get_results("SELECT option_name, option_value FROM {$table} WHERE " . $this->buildWhereClause(), ARRAY_A);
+        foreach ((array) $rows as $row) {
+            if (is_array($row) && isset($row['option_name'])) {
+                $ist[(string) $row['option_name']] = (string) ($row['option_value'] ?? '');
+            }
+        }
+
+        $abweichungen = [];
+        foreach ($snapshot as $row) {
+            $name = $row['option_name'];
+            if (!array_key_exists($name, $ist)) {
+                $abweichungen[] = $name . ' (fehlt)';
+                continue;
+            }
+            if ($ist[$name] !== $row['option_value']) {
+                $abweichungen[] = $name . ' (fremder Wert)';
+            }
+        }
+
+        if ($abweichungen === []) {
+            return;
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Der Schutz der site-eigenen Options hat in %s nicht gegriffen. Betroffen: %s%s',
+            $optionsTable,
+            implode(', ', array_slice($abweichungen, 0, 8)),
+            count($abweichungen) > 8 ? sprintf(' und %d weitere', count($abweichungen) - 8) : ''
+        ));
+    }
+
+    private function lastError(): string
+    {
+        global $wpdb;
+
+        $fehler = trim((string) ($wpdb->last_error ?? ''));
+
+        return $fehler !== '' ? $fehler : 'kein Fehlertext von der Datenbank';
     }
 
     /**
