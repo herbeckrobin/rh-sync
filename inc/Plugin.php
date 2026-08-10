@@ -86,6 +86,11 @@ final class Plugin
         $syncController->boot();
         (new SyncProgressIndicator())->boot();
 
+        // Werkzeuge für die Kommandozeile. Nur dort registriert, im Web kostet das nichts.
+        if (defined('WP_CLI') && WP_CLI) {
+            \WP_CLI::add_command('rh sync', new Cli\SyncCommand($peerRegistry, $syncLog, $ticker));
+        }
+
         // Entkopplung: rh-sync steuert seinen Dashboard-Quick-Link selbst bei.
         add_filter('rh-blueprint/dashboard/quick_links', static function (array $links): array {
             $links[] = [

@@ -598,6 +598,11 @@ final class PullOperation implements StageAdvancer
         }
 
         $guard->restore($snapshot);
+
+        // Die Termine, die an den Inhalten hängen, kommen nicht mit: die Option `cron` bleibt
+        // beim Import ziel-lokal. Der alte, synchrone Weg hat keine Stelle, an der ein Bericht
+        // angezeigt würde, deshalb hier ohne Rückgabe. Wichtig ist, dass es überhaupt passiert.
+        (new ScheduleRebuilder())->runToCompletion($profile->options);
     }
 
     private function extractErrorMessage(SyncResponse $response): string

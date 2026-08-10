@@ -162,6 +162,10 @@ final class TickRunner
             $safety = (string) $job->summary['safety_backup_path'];
         }
 
+        $schedule = is_array($job->summary['schedule_rebuild'] ?? null)
+            ? $job->summary['schedule_rebuild']
+            : null;
+
         $this->log->record(
             $peer,
             $job->direction,
@@ -171,11 +175,26 @@ final class TickRunner
             $error,
             SyncProfile::fromArray($job->profile),
             $manifest,
-            $safety
+            $safety,
+            $schedule
         );
 
         $job->logged = true;
         $job->save();
+    }
+
+    /**
+     * Bleibt ein Job hängen, nachdem die Daten schon live stehen?
+     *
+     * Dann steckt nur der Nachlauf fest, der die Termine wiederherstellt. Das als
+     * "fehlgeschlagen" zu melden wäre schlicht falsch: der Import hat funktioniert, und wer
+     * die Meldung liest, würde nach einem Schaden suchen, den es nicht gibt. Gemeldet wird
+     * stattdessen ein Erfolg ohne Termin-Bericht, und das heißt "nicht geprüft".
+     */
+    private function stuckInAftercare(JobState $job): bool
+    {
+        return $job->importCommitted
+            && (string) ($job->cursor['ij_phase'] ?? '') === 'aftercare';
     }
 
     /**
@@ -197,6 +216,16 @@ final class TickRunner
             }
 
             if ($job->retries >= self::MAX_RETRIES) {
+                if ($this->stuckInAftercare($job)) {
+                    $job->finishSuccess([
+                        'safety_backup_path' => $job->cursor['ij_safety_path'] ?? null,
+                        'profile' => $job->profile,
+                        'schedule_rebuild' => null,
+                    ]);
+                    $this->logCompletion($job);
+                    continue;
+                }
+
                 $job->finishFailure(
                     __('Der Sync blieb stehen (kein Fortschritt mehr). Bitte neu starten.', 'rh-sync'),
                     $job->stage
