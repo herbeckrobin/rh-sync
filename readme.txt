@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.6.1
+Stable tag: 0.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,19 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.7.0 =
+* A sync no longer carries its own pairing to the other side. Peer list, history and running jobs describe the site they belong to, so they stay there. Previously a pull could leave the target with the source's peer list, pointing the connection at the wrong site.
+* The protection of a site's own settings is now verified instead of assumed. Every write is checked and read back, and a failed protection stops the import before anything goes live rather than reporting success.
+* A peer whose address is this site itself is rejected when the connection is created, with an explanation.
+* After an import, tables the source uses but this site has never had are named in the summary, for example the queue tables of WooCommerce. They are not created: that is the job of the plugin that needs them.
+* Scheduled posts keep their publishing date through a sync. Until now the posts arrived but their timers did not, because the target site keeps its own scheduling data during an import. Scheduled posts stayed scheduled forever and never appeared.
+* A post whose publishing date has already passed is reported by name instead of being published. A sync never publishes anything on its own.
+* Pending trackbacks and leftover import cleanups get their timers back as well, and timers pointing at posts that no longer exist are removed.
+* The summary and the history now say what was restored and what needs a decision.
+* New command line tools for checking and repairing a site: see wp help rh sync. Among them "wp rh sync schedule" to see which timers are missing and "wp rh sync schedule-repair" to restore them without waiting for the next sync.
+* A sync that does not include settings no longer writes to the settings table at all. Previously it logged database errors and rewrote rows it had never touched.
+* Requires db-engine 1.4.0, which is bundled. Both sites need this version before a sync stops carrying its own pairing across.
 
 = 0.6.1 =
 * Fixes an import that could fail on tables carrying named foreign keys, as used by some plugins. Such tables are now built without their foreign keys, which are re-applied once the new data is live.
