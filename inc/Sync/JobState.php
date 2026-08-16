@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace RhSync\Sync;
 
+use RhTickEngine\TickJob;
+
 /**
  * Persistenter Zustand eines Sync-Jobs.
  *
@@ -18,7 +20,7 @@ namespace RhSync\Sync;
  * Der schlanke Frontend-Status (Polling) wird via {@see SyncStatus::project()} aus diesem
  * State in den bekannten Transient projiziert, der Frontend-Contract bleibt unverändert.
  */
-final class JobState
+final class JobState implements TickJob
 {
     public const OPTION_PREFIX = 'rhbp_sync_job_';
     public const LOCK_PREFIX = 'rhbp_sync_lock_';
@@ -223,6 +225,58 @@ final class JobState
     public function isFinished(): bool
     {
         return $this->stage === SyncStatus::PHASE_DONE || $this->stage === SyncStatus::PHASE_FAILED;
+    }
+
+    // ============================================================
+    // Was der geteilte Antrieb sehen muss (siehe RhTickEngine\TickJob)
+    // ============================================================
+
+    public function jobId(): string
+    {
+        return $this->jobId;
+    }
+
+    public function spawnToken(): string
+    {
+        return $this->spawnToken;
+    }
+
+    /**
+     * Gesperrt wird pro Gegenstelle: zwei Peers dürfen gleichzeitig laufen,
+     * zwei Läufe auf denselben Peer nicht.
+     */
+    public function lockKey(): string
+    {
+        return $this->peerId;
+    }
+
+    public function retries(): int
+    {
+        return $this->retries;
+    }
+
+    public function setRetries(int $n): void
+    {
+        $this->retries = $n;
+    }
+
+    public function failWith(string $error): void
+    {
+        $this->finishFailure($error, $this->stage);
+    }
+
+    public function stageName(): string
+    {
+        return $this->stage;
+    }
+
+    public function duration(): int
+    {
+        if ($this->startedAt === null) {
+            return 0;
+        }
+
+        return ($this->endedAt ?? time()) - $this->startedAt;
     }
 
     // ============================================================

@@ -83,6 +83,8 @@ namespace {
     }
     $GLOBALS['wpdb'] = new MiniWpdb();
 
+    // Die Tick-Engine liefert das Interface, das JobState erfuellt.
+    require_once dirname(__DIR__) . '/vendor/rh/tick-engine/autoload-src.php';
     require_once dirname(__DIR__) . '/inc/Sync/LocalOptionGuard.php';
     require_once dirname(__DIR__) . '/inc/Sync/SyncStatus.php';
     require_once dirname(__DIR__) . '/inc/Sync/SyncProfile.php';

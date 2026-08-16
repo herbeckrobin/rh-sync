@@ -122,6 +122,9 @@ namespace {
     }
 
     $base = dirname(__DIR__) . '/inc/Sync/';
+// Die Tick-Engine liefert das Interface, das JobState erfuellt.
+require_once dirname(__DIR__) . '/vendor/rh/tick-engine/autoload-src.php';
+
     foreach (['SyncStatus', 'SyncProfile', 'SyncPermissions', 'Peer', 'PeerRegistry', 'SyncLog', 'JobState', 'JobScheduler', 'TickRunner'] as $cls) {
         require_once $base . $cls . '.php';
     }

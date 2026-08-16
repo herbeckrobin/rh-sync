@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "bee80f0c082dd37a3297c7c74033401a",
+    "content-hash": "a6e8958286c4cd172335e2436ee302c8",
     "packages": [
         {
             "name": "rh/blueprint-core",
@@ -83,6 +83,45 @@
                 "issues": "https://github.com/herbeckrobin/rh-db-engine/issues"
             },
             "time": "2026-08-10T13:43:20+00:00"
+        },
+        {
+            "name": "rh/tick-engine",
+            "version": "v1.0.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/herbeckrobin/rh-tick-engine.git",
+                "reference": "4a91417f121aa90d9d2857b8e597396676cc8891"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/herbeckrobin/rh-tick-engine/zipball/4a91417f121aa90d9d2857b8e597396676cc8891",
+                "reference": "4a91417f121aa90d9d2857b8e597396676cc8891",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.1"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "rh-tick-engine.php"
+                ]
+            },
+            "license": [
+                "GPL-2.0-or-later"
+            ],
+            "authors": [
+                {
+                    "name": "Robin Herbeck",
+                    "homepage": "https://robinherbeck.de"
+                }
+            ],
+            "description": "Geteilte Tick-Engine der rh-blueprint Kollektion: lange Läufe in Schritten, mit Zustand, Sperre, Antrieb und Watchdog.",
+            "support": {
+                "source": "https://github.com/herbeckrobin/rh-tick-engine/tree/v1.0.2",
+                "issues": "https://github.com/herbeckrobin/rh-tick-engine/issues"
+            },
+            "time": "2026-08-16T12:15:03+00:00"
         },
         {
             "name": "yahnis-elsts/plugin-update-checker",

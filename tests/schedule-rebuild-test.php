@@ -336,6 +336,9 @@ final class FakeWpdb
 $wpdb = new FakeWpdb();
 $GLOBALS['wpdb'] = $wpdb;
 
+// Die Tick-Engine liefert das Interface, das JobState und UploadJob erfuellen.
+require_once dirname(__DIR__) . '/vendor/rh/tick-engine/autoload-src.php';
+
 require_once dirname(__DIR__) . '/inc/Sync/ScheduleReport.php';
 require_once dirname(__DIR__) . '/inc/Sync/ScheduleRebuilder.php';
 require_once dirname(__DIR__) . '/inc/Sync/Schedule.php';

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace RhSync\Sync;
 
+use RhTickEngine\TickLock;
+
 /**
  * Führt einen einzelnen Sync-Tick aus und hält die Tick-Kette am Laufen.
  *
@@ -16,6 +18,13 @@ final class TickRunner
 {
     /** Wie oft ein hängender Job vom Watchdog wiederbelebt wird, bevor er als gescheitert gilt. */
     public const MAX_RETRIES = 3;
+
+    /**
+     * Wie lange die Sperre eines Schrittes haelt. Grosszuegiger als das
+     * Zeitbudget: ein vom Webserver abgeschossener Schritt gibt seine Sperre
+     * nicht zurueck, sie muss von selbst verfallen.
+     */
+    private const TICK_LOCK_TTL = 240;
 
     /** @var callable(JobState): StageAdvancer */
     private $advancerResolver;
@@ -80,6 +89,31 @@ final class TickRunner
             return;
         }
 
+        // Der Vorfall vom 2026-08-02: Selbstantrieb und Cron-Watchdog treffen
+        // fuer denselben Lauf zusammen und arbeiten beide am selben Cursor.
+        // Die Stillstands-Pruefung des Watchdogs schuetzt davor nicht: ein
+        // Schritt, der laenger als die Schwelle braucht (grosse Tabelle, langer
+        // Chunk), sieht von aussen genauso aus wie ein haengender. rh-backup
+        // hatte diese Sperre laengst, hier fehlte sie.
+        $riegel = 'sync_tick_' . $job->jobId;
+
+        if (! TickLock::acquire($riegel, self::TICK_LOCK_TTL)) {
+            return;
+        }
+
+        try {
+            $this->tickInner($job);
+        } finally {
+            TickLock::release($riegel);
+        }
+    }
+
+    /**
+     * Der eigentliche Schritt. Getrennt, damit die Sperre in jedem Fall wieder
+     * freigegeben wird, auch wenn hier etwas durchschlaegt.
+     */
+    private function tickInner(JobState $job): void
+    {
         $job->markStarted();
 
         // Ab hier führt jeder Schritt Protokoll in einer Datei. Stirbt der Prozess mitten
