@@ -748,23 +748,15 @@ final class SyncPeersPage
 
         $pairingCode = $peer->makePairingCode();
 
-        echo '<div class="rhbp-modal-backdrop is-open" id="rhbp-modal-code" data-rhbp-modal-backdrop>';
-        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr(sprintf(/* translators: %s: peer name */ __('Verbindung „%s" erstellt', 'rh-sync'), $peer->name)) . '">';
-
-        echo '<div class="rhbp-modal__head">';
-        echo '<div class="rhbp-modal__head-l">';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<span class="rhbp-modal__head-icon rhbp-modal__head-icon--ok">' . $this->icon('check') . '</span>';
-        echo '<div>';
-        echo '<h3 class="rhbp-modal__title">' . esc_html(sprintf(/* translators: %s: peer name */ __('Verbindung „%s" erstellt', 'rh-sync'), $peer->name)) . '</h3>';
-        echo '<p class="rhbp-modal__sub">' . esc_html__('Ein Schritt fehlt noch auf der anderen Site.', 'rh-sync') . '</p>';
-        echo '</div>';
-        echo '</div>';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
-        echo '</div>';
-
-        echo '<div class="rhbp-modal__body">';
+        echo Ui::modalOpen([
+            'id' => 'rhbp-modal-code',
+            /* translators: %s: peer name */
+            'title' => sprintf(__('Verbindung „%s" erstellt', 'rh-sync'), $peer->name),
+            'subtitle' => __('Ein Schritt fehlt noch auf der anderen Site.', 'rh-sync'),
+            'icon' => 'check',
+            'tone' => 'ok',
+            'open' => true,
+        ]);
         echo '<p style="margin-top:0;">' . wp_kses(
             sprintf(/* translators: %s: bold path "Sync -> Code eingeben" */ __('Öffne auf der anderen Site %s und füg diesen Code ein:', 'rh-sync'), '<strong>' . esc_html__('Sync → Code eingeben', 'rh-sync') . '</strong>'),
             ['strong' => []]
@@ -779,14 +771,7 @@ final class SyncPeersPage
         // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
         echo '<div class="rhbp-callout rhbp-callout--warn" style="margin-top:14px;">' . $this->icon('lock', 'sm') . '<span>' . esc_html__('Der Code enthält ein geheimes Token. Gib ihn nur über einen sicheren Weg weiter (1Password, verschlüsselter Chat), nicht offen. Nach dem Schließen ist er nicht mehr abrufbar, dann nur noch neu erzeugen.', 'rh-sync') . '</span></div>';
 
-        echo '</div>';
-
-        echo '<div class="rhbp-modal__foot">';
-        echo '<button type="button" class="rhbp-btn rhbp-btn--primary" data-rhbp-modal-close>' . esc_html__('Fertig', 'rh-sync') . '</button>';
-        echo '</div>';
-
-        echo '</div>';
-        echo '</div>';
+        echo Ui::modalClose(['cancel' => __('Fertig', 'rh-sync')]);
     }
 
     private function renderPullResultNotice(): void
@@ -1147,39 +1132,26 @@ final class SyncPeersPage
     {
         $modalId = 'rhbp-modal-settings-' . $peer->id;
 
-        echo '<div class="rhbp-modal-backdrop" id="' . esc_attr($modalId) . '" data-rhbp-modal-backdrop>';
-        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr(sprintf(/* translators: %s: peer name */ __('Einstellungen für %s', 'rh-sync'), $peer->name)) . '">';
+        echo Ui::modalOpen([
+            'id' => $modalId,
+            /* translators: %s: peer name */
+            'title' => sprintf(__('Einstellungen · %s', 'rh-sync'), $peer->name),
+            'subtitle' => $peer->url,
+            'icon' => 'gear',
+        ]);
 
-        // Kopf
-        echo '<div class="rhbp-modal__head">';
-        echo '<div class="rhbp-modal__head-l">';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<span class="rhbp-modal__head-icon">' . $this->icon('gear') . '</span>';
-        echo '<div>';
-        echo '<h3 class="rhbp-modal__title">' . esc_html(sprintf(/* translators: %s: peer name */ __('Einstellungen · %s', 'rh-sync'), $peer->name)) . '</h3>';
-        echo '<p class="rhbp-modal__sub">' . esc_html($peer->url) . '</p>';
-        echo '</div>';
-        echo '</div>';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
-        echo '</div>';
-
-        echo '<div class="rhbp-modal__body">';
-
-        // Sub-Tabs
-        echo '<div class="rhbp-subtabs">';
-        echo '<button type="button" class="rhbp-subtab is-active" data-rhbp-subtab="profile">' . esc_html__('Sync-Profil', 'rh-sync') . '</button>';
-        echo '<button type="button" class="rhbp-subtab" data-rhbp-subtab="perms">' . esc_html__('Berechtigungen', 'rh-sync') . '</button>';
-        echo '<button type="button" class="rhbp-subtab" data-rhbp-subtab="conn">' . esc_html__('Verbindung', 'rh-sync') . '</button>';
-        echo '</div>';
+        echo Ui::subtabs([
+            'profile' => __('Sync-Profil', 'rh-sync'),
+            'perms' => __('Berechtigungen', 'rh-sync'),
+            'conn' => __('Verbindung', 'rh-sync'),
+        ], 'profile');
 
         $this->renderProfilePane($peer);
         $this->renderPermsPane($peer);
         $this->renderConnPane($peer);
 
-        echo '</div>'; // body
-        echo '</div>'; // modal
-        echo '</div>'; // backdrop
+        // Jeder Bereich hat sein eigenes Formular mit eigenem Knopf.
+        echo Ui::modalClose(['foot' => false]);
     }
 
     private function renderProfilePane(Peer $peer): void
@@ -1502,27 +1474,16 @@ final class SyncPeersPage
      */
     private function renderCreateModal(): void
     {
-        echo '<div class="rhbp-modal-backdrop" id="rhbp-modal-create" data-rhbp-modal-backdrop>';
-        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr__('Verbindung erzeugen', 'rh-sync') . '">';
+        echo Ui::modalOpen([
+            'id' => 'rhbp-modal-create',
+            'title' => __('Verbindung erzeugen', 'rh-sync'),
+            'subtitle' => __('Du startest die Kopplung und gibst der Gegenseite danach einen Code.', 'rh-sync'),
+            'icon' => 'plus',
+            'form' => admin_url('admin-post.php'),
+        ]);
 
-        echo '<div class="rhbp-modal__head">';
-        echo '<div class="rhbp-modal__head-l">';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<span class="rhbp-modal__head-icon">' . $this->icon('plus') . '</span>';
-        echo '<div>';
-        echo '<h3 class="rhbp-modal__title">' . esc_html__('Verbindung erzeugen', 'rh-sync') . '</h3>';
-        echo '<p class="rhbp-modal__sub">' . esc_html__('Du startest die Kopplung und gibst der Gegenseite danach einen Code.', 'rh-sync') . '</p>';
-        echo '</div>';
-        echo '</div>';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
-        echo '</div>';
-
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         wp_nonce_field(self::NONCE_ADD);
         echo '<input type="hidden" name="action" value="rhbp_peer_add" />';
-
-        echo '<div class="rhbp-modal__body">';
 
         echo '<div class="rhbp-field">';
         echo '<label for="rhbp-create-name">' . esc_html__('Name der Gegenseite', 'rh-sync') . '</label>';
@@ -1538,16 +1499,11 @@ final class SyncPeersPage
 
         $this->renderInsecureOptIn();
 
-        echo '</div>'; // body
-
-        echo '<div class="rhbp-modal__foot">';
-        echo '<button type="button" class="rhbp-btn" data-rhbp-modal-close>' . esc_html__('Abbrechen', 'rh-sync') . '</button>';
-        echo '<button type="submit" class="rhbp-btn rhbp-btn--primary">' . esc_html__('Erzeugen und Code anzeigen', 'rh-sync') . '</button>';
-        echo '</div>';
-
-        echo '</form>';
-        echo '</div>';
-        echo '</div>';
+        echo Ui::modalClose([
+            'primary' => __('Erzeugen und Code anzeigen', 'rh-sync'),
+            'cancel' => __('Abbrechen', 'rh-sync'),
+            'form' => true,
+        ]);
     }
 
     /**
@@ -1556,27 +1512,16 @@ final class SyncPeersPage
      */
     private function renderJoinModal(): void
     {
-        echo '<div class="rhbp-modal-backdrop" id="rhbp-modal-join" data-rhbp-modal-backdrop>';
-        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr__('Code eingeben', 'rh-sync') . '">';
-
-        echo '<div class="rhbp-modal__head">';
-        echo '<div class="rhbp-modal__head-l">';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<span class="rhbp-modal__head-icon">' . $this->icon('inbox') . '</span>';
-        echo '<div>';
-        echo '<h3 class="rhbp-modal__title">' . esc_html__('Code eingeben', 'rh-sync') . '</h3>';
-        echo '<p class="rhbp-modal__sub">' . esc_html__('Den Code hat dir die andere Site beim Erzeugen angezeigt.', 'rh-sync') . '</p>';
-        echo '</div>';
-        echo '</div>';
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- intern erzeugtes SVG-Icon aus festen Konstanten, kein User-Input.
-        echo '<button type="button" class="rhbp-btn rhbp-btn--ghost rhbp-btn--icon" data-rhbp-modal-close aria-label="' . esc_attr__('Schließen', 'rh-sync') . '">' . $this->icon('close') . '</button>';
-        echo '</div>';
-
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        echo Ui::modalOpen([
+            'id' => 'rhbp-modal-join',
+            'title' => __('Code eingeben', 'rh-sync'),
+            'subtitle' => __('Den Code hat dir die andere Site beim Erzeugen angezeigt.', 'rh-sync'),
+            'icon' => 'inbox',
+            'form' => admin_url('admin-post.php'),
+        ]);
         wp_nonce_field(self::NONCE_ADD);
         echo '<input type="hidden" name="action" value="rhbp_peer_add" />';
 
-        echo '<div class="rhbp-modal__body">';
         echo '<div class="rhbp-field">';
         echo '<label for="rhbp-join-code">' . esc_html__('Code von der anderen Site', 'rh-sync') . '</label>';
         echo '<textarea id="rhbp-join-code" name="peer_pairing" rows="3" placeholder="' . esc_attr__('Code hier einfügen…', 'rh-sync') . '" required></textarea>';
@@ -1585,16 +1530,11 @@ final class SyncPeersPage
 
         $this->renderInsecureOptIn();
 
-        echo '</div>';
-
-        echo '<div class="rhbp-modal__foot">';
-        echo '<button type="button" class="rhbp-btn" data-rhbp-modal-close>' . esc_html__('Abbrechen', 'rh-sync') . '</button>';
-        echo '<button type="submit" class="rhbp-btn rhbp-btn--primary">' . esc_html__('Verbinden', 'rh-sync') . '</button>';
-        echo '</div>';
-
-        echo '</form>';
-        echo '</div>';
-        echo '</div>';
+        echo Ui::modalClose([
+            'primary' => __('Verbinden', 'rh-sync'),
+            'cancel' => __('Abbrechen', 'rh-sync'),
+            'form' => true,
+        ]);
     }
 
     /**
