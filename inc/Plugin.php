@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RhSync;
 
 use RhBlueprint\Core\Core;
+use RhBlueprint\Core\UpdateChecker;
 use RhBlueprint\Core\Settings\SettingsPage;
 use RhSync\Admin\SyncPeersPage;
 use RhSync\Admin\SyncProgressIndicator;
@@ -34,11 +35,9 @@ final class Plugin
 {
     public static function boot(): void
     {
-        // Im WordPress.org-Build wird der UpdateChecker entfernt (WP.org liefert
-        // Updates selbst), darum defensiv prüfen.
-        if (class_exists(UpdateChecker::class)) {
-            (new UpdateChecker())->boot();
-        }
+        add_action('plugins_loaded', static function (): void {
+            (new UpdateChecker('rh-sync', RHSYNC_PLUGIN_FILE))->boot();
+        }, 0);
 
         add_action('rh-blueprint/core/booted', [self::class, 'onCoreBooted']);
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace RhSync\Sync;
 
+use RhBlueprint\Core\Support\Bytes;
+
 /**
  * Vorab-Prüfung vor einem Sync: erhebt die relevanten Server-Limits und den freien
  * Plattenplatz und bewertet, ob ein Transfer der erwarteten Größe durchlaufen kann.
@@ -91,25 +93,13 @@ final class Preflight
 
     /**
      * Wandelt einen ini-Größenwert ("256M", "1G", "512K") in Bytes. -1 (unbegrenzt) => PHP_INT_MAX.
+     *
+     * Hier ist PHP_INT_MAX die richtige Wahl und nicht 0: der Wert wird gegen
+     * die erwartete Datenmenge gehalten, und ein Limit von 0 hiesse, jeden Sync
+     * abzulehnen. Bleibt als Methode stehen, weil sie öffentlich ist.
      */
     public static function bytesFromIni(string $value): int
     {
-        $value = trim($value);
-        if ($value === '' || $value === '0') {
-            return 0;
-        }
-        if ($value === '-1') {
-            return PHP_INT_MAX;
-        }
-
-        $unit = strtolower(substr($value, -1));
-        $number = (int) $value;
-
-        return match ($unit) {
-            'g' => $number * 1024 * 1024 * 1024,
-            'm' => $number * 1024 * 1024,
-            'k' => $number * 1024,
-            default => (int) $value,
-        };
+        return Bytes::fromIni($value, Bytes::UNLIMITED_MAX);
     }
 }

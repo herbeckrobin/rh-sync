@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace RhSync\Admin;
 
+use RhBlueprint\Core\Admin\Ui;
+use RhBlueprint\Core\Admin\Guard;
 use RhBlueprint\Core\Settings\SettingsPage;
 use RhSync\Sync\JobState;
 use RhSync\Sync\Peer;
@@ -173,6 +175,13 @@ final class SyncPeersPage
      */
     private function icon(string $name, string $size = ''): string
     {
+        // Geteilte Symbole kommen aus dem Core, damit derselbe Knopf überall
+        // dieselbe Form hat. Papierkorb, Kopieren und Neu laden waren vorher
+        // in mehreren Modulen mehrere Zeichnungen.
+        if (Ui::hasIcon($name)) {
+            return Ui::icon($name, $size);
+        }
+
         $paths = [
             'plus' => '<path d="M12 5v14M5 12h14"/>',
             'inbox' => '<path d="M4 7v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7M4 7l8 6 8-6"/>',
@@ -199,10 +208,7 @@ final class SyncPeersPage
 
     public function handleAdd(): void
     {
-        if (!current_user_can(self::CAPABILITY)) {
-            wp_die(esc_html__('Keine Berechtigung.', 'rh-sync'), '', ['response' => 403]);
-        }
-        check_admin_referer(self::NONCE_ADD);
+        Guard::form(self::NONCE_ADD, self::CAPABILITY);
 
         $name = isset($_POST['peer_name']) ? sanitize_text_field(wp_unslash($_POST['peer_name'])) : '';
         $url = isset($_POST['peer_url']) ? esc_url_raw(wp_unslash($_POST['peer_url'])) : '';
@@ -266,10 +272,7 @@ final class SyncPeersPage
 
     public function handleRemove(): void
     {
-        if (!current_user_can(self::CAPABILITY)) {
-            wp_die(esc_html__('Keine Berechtigung.', 'rh-sync'), '', ['response' => 403]);
-        }
-        check_admin_referer(self::NONCE_REMOVE);
+        Guard::form(self::NONCE_REMOVE, self::CAPABILITY);
 
         $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         if ($id !== '') {
@@ -282,10 +285,7 @@ final class SyncPeersPage
 
     public function handleRegenerate(): void
     {
-        if (!current_user_can(self::CAPABILITY)) {
-            wp_die(esc_html__('Keine Berechtigung.', 'rh-sync'), '', ['response' => 403]);
-        }
-        check_admin_referer(self::NONCE_REGEN);
+        Guard::form(self::NONCE_REGEN, self::CAPABILITY);
 
         $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
@@ -306,10 +306,7 @@ final class SyncPeersPage
 
     public function handleUpdateProfile(): void
     {
-        if (!current_user_can(self::CAPABILITY)) {
-            wp_die(esc_html__('Keine Berechtigung.', 'rh-sync'), '', ['response' => 403]);
-        }
-        check_admin_referer(self::NONCE_PROFILE);
+        Guard::form(self::NONCE_PROFILE, self::CAPABILITY);
 
         $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
@@ -329,10 +326,7 @@ final class SyncPeersPage
 
     public function handleUpdatePermissions(): void
     {
-        if (!current_user_can(self::CAPABILITY)) {
-            wp_die(esc_html__('Keine Berechtigung.', 'rh-sync'), '', ['response' => 403]);
-        }
-        check_admin_referer(self::NONCE_PERMISSIONS);
+        Guard::form(self::NONCE_PERMISSIONS, self::CAPABILITY);
 
         $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
@@ -353,10 +347,7 @@ final class SyncPeersPage
 
     public function handlePull(): void
     {
-        if (!current_user_can(self::CAPABILITY)) {
-            wp_die(esc_html__('Keine Berechtigung.', 'rh-sync'), '', ['response' => 403]);
-        }
-        check_admin_referer(self::NONCE_PULL);
+        Guard::form(self::NONCE_PULL, self::CAPABILITY);
 
         $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
@@ -384,10 +375,7 @@ final class SyncPeersPage
 
     public function handlePush(): void
     {
-        if (!current_user_can(self::CAPABILITY)) {
-            wp_die(esc_html__('Keine Berechtigung.', 'rh-sync'), '', ['response' => 403]);
-        }
-        check_admin_referer(self::NONCE_PUSH);
+        Guard::form(self::NONCE_PUSH, self::CAPABILITY);
 
         $id = isset($_POST['peer_id']) ? sanitize_text_field(wp_unslash($_POST['peer_id'])) : '';
         $peer = $id !== '' ? $this->registry->get($id) : null;
@@ -761,7 +749,7 @@ final class SyncPeersPage
         $pairingCode = $peer->makePairingCode();
 
         echo '<div class="rhbp-modal-backdrop is-open" id="rhbp-modal-code" data-rhbp-modal-backdrop>';
-        echo '<div class="rhbp-modal" role="dialog" aria-modal="true">';
+        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr(sprintf(/* translators: %s: peer name */ __('Verbindung „%s" erstellt', 'rh-sync'), $peer->name)) . '">';
 
         echo '<div class="rhbp-modal__head">';
         echo '<div class="rhbp-modal__head-l">';
@@ -1515,7 +1503,7 @@ final class SyncPeersPage
     private function renderCreateModal(): void
     {
         echo '<div class="rhbp-modal-backdrop" id="rhbp-modal-create" data-rhbp-modal-backdrop>';
-        echo '<div class="rhbp-modal" role="dialog" aria-modal="true">';
+        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr__('Verbindung erzeugen', 'rh-sync') . '">';
 
         echo '<div class="rhbp-modal__head">';
         echo '<div class="rhbp-modal__head-l">';
@@ -1569,7 +1557,7 @@ final class SyncPeersPage
     private function renderJoinModal(): void
     {
         echo '<div class="rhbp-modal-backdrop" id="rhbp-modal-join" data-rhbp-modal-backdrop>';
-        echo '<div class="rhbp-modal" role="dialog" aria-modal="true">';
+        echo '<div class="rhbp-modal" role="dialog" aria-modal="true" aria-label="' . esc_attr__('Code eingeben', 'rh-sync') . '">';
 
         echo '<div class="rhbp-modal__head">';
         echo '<div class="rhbp-modal__head-l">';

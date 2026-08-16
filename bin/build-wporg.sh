@@ -3,9 +3,11 @@
 # Baut ein WordPress.org-taugliches ZIP des Plugins.
 #
 # Unterschied zum GitHub-Release (release.yml):
-#   - Auto-Update-Checker wird entfernt (inc/UpdateChecker.php +
-#     yahnis-elsts/plugin-update-checker). Auf WordPress.org verboten,
-#     dort liefert WordPress die Updates selbst.
+#   - Auto-Update-Checker wird entfernt (yahnis-elsts/plugin-update-checker).
+#     Auf WordPress.org verboten, dort liefert WordPress die Updates selbst.
+#     Die Klasse liegt im Core und prueft selbst, ob es die Bibliothek gibt:
+#     ohne sie tut ihr boot() nichts. Es reicht also, die Abhaengigkeit zu
+#     entfernen, an der Klasse ist nichts zu loeschen.
 #   - Der "Update URI"-Header wird entfernt (zeigt sonst auf GitHub).
 #
 # Ergebnis: dist/<slug>-wporg.zip
@@ -26,14 +28,12 @@ rsync -a --exclude-from="${SRC}/.distignore" "${SRC}/" "${DEST}/"
 
 cd "$DEST"
 
-# 2) Auto-Update-Checker entfernen.
-rm -f inc/UpdateChecker.php
-
 # GitHub-Auth fuer Composer (gegen Rate-Limit beim VCS-Ziehen von core/db-engine).
 if command -v gh >/dev/null 2>&1; then
   composer config --global github-oauth.github.com "$(gh auth token)" >/dev/null 2>&1 || true
 fi
 
+# 2) Auto-Update-Checker entfernen.
 composer remove yahnis-elsts/plugin-update-checker \
   --update-no-dev --no-interaction --no-progress --optimize-autoloader
 
