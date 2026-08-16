@@ -26,6 +26,9 @@ final class TickRunner
      */
     private const TICK_LOCK_TTL = 240;
 
+    /** Mindestabstand zwischen zwei Schritten, in Sekunden. Siehe throttle(). */
+    private const MIN_TICK_GAP = 2.0;
+
     /** @var callable(JobState): StageAdvancer */
     private $advancerResolver;
 
@@ -114,6 +117,8 @@ final class TickRunner
      */
     private function tickInner(JobState $job): void
     {
+        $begonnen = microtime(true);
+
         $job->markStarted();
 
         // Ab hier führt jeder Schritt Protokoll in einer Datei. Stirbt der Prozess mitten
@@ -144,7 +149,51 @@ final class TickRunner
 
         // Heartbeat + Frontend-Projektion, dann nächsten Tick anstoßen.
         $job->touch();
+        $this->throttle($begonnen);
         $this->scheduler->spawnLoopback($job);
+    }
+
+    /**
+     * Haelt den Takt, wenn der Schritt schneller fertig war als erlaubt.
+     *
+     * Der Fall, um den es geht, ist der Wartezustand: waehrend die Gegenseite
+     * importiert, fragt der Push-Client nur nach, ob sie fertig ist. Dieser
+     * Schritt kehrt nach Millisekunden zurueck und treibt sofort den naechsten
+     * an. Gemessen sind das lokal 18 bis 37 ms, ueber das Netz 0,2 bis 0,6
+     * Sekunden, also hundert bis mehrere hundert Runden pro Minute, jede mit
+     * einem Aufruf zur Gegenseite. Und das ueber die ganze Dauer des Imports,
+     * bei grossen Datenmengen eine halbe Stunde und mehr.
+     *
+     * Auf den Shared-Hostern, mit denen wir es zu tun haben (ADKRU, Kraus und
+     * Hampp), ist genau das die Sorte Verhalten, die eine Ratenbremse oder eine
+     * WAF auf den Plan ruft. Zwei Sekunden Abstand machen daraus dreissig
+     * Runden pro Minute, fuer die Fortschrittsanzeige immer noch fluessig.
+     *
+     * Ein arbeitender Schritt kommt hier nie zum Zug, der hat sein Budget
+     * verbraucht und die Zeit ist laengst um.
+     */
+    private function throttle(float $begonnen): void
+    {
+        /**
+         * Mindestabstand zwischen zwei Schritten, in Sekunden.
+         * Abschaltbar mit 0, damit Tests nicht in Echtzeit warten muessen.
+         *
+         * @param float $abstand
+         */
+        $abstand = (float) apply_filters('rh-blueprint/sync/min_tick_gap', self::MIN_TICK_GAP);
+        $abstand = max(0.0, min(30.0, $abstand));
+
+        if ($abstand <= 0.0) {
+            return;
+        }
+
+        $rest = $abstand - (microtime(true) - $begonnen);
+
+        if ($rest <= 0.0) {
+            return;
+        }
+
+        usleep((int) round($rest * 1000000));
     }
 
     /**
