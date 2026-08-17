@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.8.0
+Stable tag: 0.8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,9 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.8.1 =
+* Fix: bundle core 2.6.1. The 2.6.0 release bundled an incomplete core.
 
 = 0.8.0 =
 * Fix: two drivers can no longer work on the same run at once. This is the fix for the incident of 2026-08-02, now covered by a test.
