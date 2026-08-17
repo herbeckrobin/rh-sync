@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "rh/blueprint-core",
-            "version": "v2.5.1",
+            "version": "v2.6.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/herbeckrobin/rh-blueprint-core.git",
-                "reference": "0b1bb1dea508d3f23b6ecfa83c188c2981a38e5e"
+                "reference": "d75538cbfb5fc2e5372abd08a14c53b0c59e1e92"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/herbeckrobin/rh-blueprint-core/zipball/0b1bb1dea508d3f23b6ecfa83c188c2981a38e5e",
-                "reference": "0b1bb1dea508d3f23b6ecfa83c188c2981a38e5e",
+                "url": "https://api.github.com/repos/herbeckrobin/rh-blueprint-core/zipball/d75538cbfb5fc2e5372abd08a14c53b0c59e1e92",
+                "reference": "d75538cbfb5fc2e5372abd08a14c53b0c59e1e92",
                 "shasum": ""
             },
             "require": {
@@ -40,10 +40,10 @@
             ],
             "description": "Geteilter Core fuer die rh-blueprint Plugin-Kollektion: Service-Registry, Settings-Framework, Shared Admin-UI, Environment-Helper.",
             "support": {
-                "source": "https://github.com/herbeckrobin/rh-blueprint-core/tree/v2.5.1",
+                "source": "https://github.com/herbeckrobin/rh-blueprint-core/tree/v2.6.0",
                 "issues": "https://github.com/herbeckrobin/rh-blueprint-core/issues"
             },
-            "time": "2026-06-18T08:50:08+00:00"
+            "time": "2026-08-16T10:19:57+00:00"
         },
         {
             "name": "rh/db-engine",
@@ -86,16 +86,16 @@
         },
         {
             "name": "rh/tick-engine",
-            "version": "v1.0.2",
+            "version": "v1.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/herbeckrobin/rh-tick-engine.git",
-                "reference": "4a91417f121aa90d9d2857b8e597396676cc8891"
+                "reference": "62b9db47512c09e064d40aad25757f3f31dc0309"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/herbeckrobin/rh-tick-engine/zipball/4a91417f121aa90d9d2857b8e597396676cc8891",
-                "reference": "4a91417f121aa90d9d2857b8e597396676cc8891",
+                "url": "https://api.github.com/repos/herbeckrobin/rh-tick-engine/zipball/62b9db47512c09e064d40aad25757f3f31dc0309",
+                "reference": "62b9db47512c09e064d40aad25757f3f31dc0309",
                 "shasum": ""
             },
             "require": {
@@ -118,10 +118,10 @@
             ],
             "description": "Geteilte Tick-Engine der rh-blueprint Kollektion: lange Läufe in Schritten, mit Zustand, Sperre, Antrieb und Watchdog.",
             "support": {
-                "source": "https://github.com/herbeckrobin/rh-tick-engine/tree/v1.0.2",
+                "source": "https://github.com/herbeckrobin/rh-tick-engine/tree/v1.1.0",
                 "issues": "https://github.com/herbeckrobin/rh-tick-engine/issues"
             },
-            "time": "2026-08-16T12:15:03+00:00"
+            "time": "2026-08-17T04:52:10+00:00"
         },
         {
             "name": "yahnis-elsts/plugin-update-checker",

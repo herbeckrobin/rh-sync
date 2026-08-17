@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.7.1
+Stable tag: 0.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,11 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.8.0 =
+* Fix: two drivers can no longer work on the same run at once. This is the fix for the incident of 2026-08-02, now covered by a test.
+* Change: a step that only polls waits at least two seconds before the next one. Without it a running import fired hundreds of requests per minute at the other site, which is what trips a rate limit or a WAF on shared hosting.
+* Internal: shared building blocks from core 2.6.0, tick engine 1.1.0.
 
 = 0.7.1 =
 * Same content as 0.7.0, released under a new number. A build carrying the version 0.7.0 had already been installed on some sites before that version was published, so those sites were never offered the update. If you are on 0.7.0, this is the release you want.
