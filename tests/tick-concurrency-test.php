@@ -41,6 +41,8 @@ namespace {
     // --- WordPress-Ersatz ------------------------------------------------
 
     $GLOBALS['rh_options'] = [];
+    $GLOBALS['rh_spawns'] = [];
+    $GLOBALS['rh_nachfolger'] = null;
 
     function __(string $t, string $d = ''): string
     {
@@ -55,7 +57,28 @@ namespace {
 
         // Kein Selbstantrieb: der Test taktet selbst. Dafür gibt es den
         // Filter schon, ein eigener Ersatz-Scheduler wäre nur Attrappe.
+        //
+        // Er ist zugleich der Augenblick, in dem der Nachfolger losgeschickt
+        // wird. Mitgeschrieben wird, ob die Sperre dabei noch steht, und auf
+        // Wunsch läuft der Nachfolger hier sofort (der schnelle Loopback vom
+        // 29.09.2026: 21 ms, bevor der Vorgänger seine Sperre freigab).
         if ($hook === 'rh-blueprint/sync/suppress_loopback') {
+            $job = $args[0] ?? null;
+
+            if ($job instanceof RhSync\Sync\JobState) {
+                $GLOBALS['rh_spawns'][] = [
+                    'job' => $job->jobId,
+                    'gesperrt' => array_key_exists('rhtick_lock_sync_tick_' . $job->jobId, $GLOBALS['rh_options']),
+                ];
+
+                $nachfolger = $GLOBALS['rh_nachfolger'] ?? null;
+
+                if (is_callable($nachfolger)) {
+                    $GLOBALS['rh_nachfolger'] = null;
+                    $nachfolger($job);
+                }
+            }
+
             return true;
         }
 
@@ -340,6 +363,76 @@ namespace {
         $offen === [],
         'nach einem Fehler bleibt keine Sperre liegen',
         implode(', ', $offen)
+    );
+
+    // --- Der Vorfall vom 29.09.2026: der Nachfolger kommt zu früh ----------
+    //
+    // Der Vorgänger stiess den nächsten Schritt an, während er seine Sperre
+    // noch hielt. Der Nachfolger war nach 21 ms da, fand sie besetzt und ging
+    // still. Weiter ging es nur noch über den Watchdog, einmal pro Minute.
+
+    $zaehler6 = new Mitzaehler();
+    $runner6 = baueRunner(static fn (JobState $j): Mitzaehler => $zaehler6);
+    $job6 = neuerLauf();
+
+    $GLOBALS['rh_spawns'] = [];
+    $GLOBALS['rh_nachfolger'] = static function (JobState $j) use ($runner6): void {
+        $runner6->runTick($j->jobId, $j->spawnToken);
+    };
+
+    $runner6->runTick($job6->jobId, $job6->spawnToken);
+    $GLOBALS['rh_nachfolger'] = null;
+
+    pruefe(
+        $zaehler6->aufrufe === 2,
+        'ein sofort eintreffender Nachfolger arbeitet',
+        sprintf('%d Aufrufe', $zaehler6->aufrufe)
+    );
+
+    $ersterAnstoss = $GLOBALS['rh_spawns'][0] ?? null;
+
+    pruefe(
+        $ersterAnstoss !== null && $ersterAnstoss['gesperrt'] === false,
+        'beim Anstoßen des Nachfolgers ist die Sperre frei',
+        $ersterAnstoss === null ? 'kein Anstoß' : 'Sperre stand noch'
+    );
+
+    // Ein fertiger Lauf hat keinen Nachfolger.
+    $fertig = new class {
+        public function advance(JobState $job): void
+        {
+            $job->stage = RhSync\Sync\SyncStatus::PHASE_DONE;
+            $job->save();
+        }
+    };
+
+    $runner7 = baueRunner(static fn (JobState $j) => $fertig);
+    $job7 = neuerLauf();
+
+    $GLOBALS['rh_spawns'] = [];
+    $runner7->runTick($job7->jobId, $job7->spawnToken);
+
+    pruefe(
+        $GLOBALS['rh_spawns'] === [],
+        'ein fertiger Lauf stößt nichts mehr an',
+        sprintf('%d Anstöße', count($GLOBALS['rh_spawns']))
+    );
+
+    // Der Watchdog zählt bei jeder Wiederbelebung hoch. Ein Lauf, der danach
+    // wieder Fortschritt macht, darf nicht an alten Zählerständen scheitern.
+    $zaehler8 = new Mitzaehler();
+    $runner8 = baueRunner(static fn (JobState $j): Mitzaehler => $zaehler8);
+    $job8 = neuerLauf();
+    $job8->retries = 2;
+    $job8->save();
+
+    $runner8->runTick($job8->jobId, $job8->spawnToken);
+    $job8nachher = JobState::load($job8->jobId);
+
+    pruefe(
+        $job8nachher !== null && $job8nachher->retries === 0,
+        'ein Schritt mit Fortschritt setzt die Wiederbelebungen auf 0',
+        (string) ($job8nachher?->retries ?? 'weg')
     );
 
     echo "\n";

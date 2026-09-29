@@ -104,21 +104,36 @@ final class TickRunner
             return;
         }
 
+        $begonnen = microtime(true);
+
         try {
-            $this->tickInner($job);
+            $weiter = $this->tickInner($job);
         } finally {
             TickLock::release($riegel);
         }
+
+        // Der Vorfall vom 29.09.2026 (Push Lackschmiede nach hosting-01): der
+        // Nachfolger wurde angestossen, waehrend diese Sperre noch stand. Er
+        // war nach 21 ms da (WP-Boot 13 ms), fand sie besetzt und ging still.
+        // Die Kette lief danach nur noch ueber den Watchdog, einmal pro
+        // Minute, auf beiden Seiten. Darum erst freigeben, dann anstossen,
+        // wie im Runner der Tick-Engine.
+        if (! $weiter) {
+            return;
+        }
+
+        $this->throttle($begonnen);
+        $this->scheduler->spawnLoopback($job);
     }
 
     /**
      * Der eigentliche Schritt. Getrennt, damit die Sperre in jedem Fall wieder
      * freigegeben wird, auch wenn hier etwas durchschlaegt.
+     *
+     * @return bool true, wenn der Lauf weitergeht und ein Nachfolger faellig ist.
      */
-    private function tickInner(JobState $job): void
+    private function tickInner(JobState $job): bool
     {
-        $begonnen = microtime(true);
-
         $job->markStarted();
 
         // Ab hier führt jeder Schritt Protokoll in einer Datei. Stirbt der Prozess mitten
@@ -137,20 +152,25 @@ final class TickRunner
             ]);
             $job->finishFailure($e->getMessage(), $job->stage);
             $this->logCompletion($job);
-            return;
+            return false;
         }
 
         JobTrace::write($job->jobId, 'tick_end', ['stage' => $job->stage]);
 
         if ($job->isFinished()) {
             $this->logCompletion($job);
-            return;
+            return false;
         }
 
-        // Heartbeat + Frontend-Projektion, dann nächsten Tick anstoßen.
+        // Der Schritt hat gearbeitet, der Lauf lebt. Ohne das zaehlt der
+        // Watchdog jede Wiederbelebung weiter hoch, und nach MAX_RETRIES
+        // scheitert ein Lauf, der die ganze Zeit Fortschritt gemacht hat.
+        $job->retries = 0;
+
+        // Heartbeat + Frontend-Projektion. Angestossen wird erst nach der Freigabe in runTick().
         $job->touch();
-        $this->throttle($begonnen);
-        $this->scheduler->spawnLoopback($job);
+
+        return true;
     }
 
     /**
