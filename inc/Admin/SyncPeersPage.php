@@ -1538,6 +1538,19 @@ final class SyncPeersPage
     }
 
     /**
+     * Ein Text in beiden Richtungen. Beim Pull ist der Peer die Quelle, beim Push das Ziel.
+     *
+     * Das Core-JS setzt beim Öffnen die Richtung und blendet die unpassende Fassung aus.
+     * Die Push-Fassung startet versteckt: ein älterer Core ohne diese Mechanik zeigt dann
+     * weiter den Pull-Text wie bisher, statt beide nebeneinander.
+     */
+    private function byDirection(string $pull, string $push): string
+    {
+        return '<span data-for-direction="pull">' . esc_html($pull) . '</span>'
+            . '<span data-for-direction="push" hidden>' . esc_html($push) . '</span>';
+    }
+
+    /**
      * Modal-Template (versteckt), wird per JS gefuellt und sichtbar gemacht.
      */
     private function renderSyncModalTemplate(): void
@@ -1569,17 +1582,17 @@ final class SyncPeersPage
         // Loading-State (Pre-Flight)
         echo '<div class="rhbp-sync-modal__state" data-state="loading">';
         echo '<div class="rhbp-sync-modal__loader"><span class="rhbp-sync-modal__spinner" aria-hidden="true"></span></div>';
-        echo '<p>' . esc_html__('Verbindung zur Quelle prüfen...', 'rh-sync') . '</p>';
+        echo '<p>' . $this->byDirection(__('Verbindung zur Quelle prüfen...', 'rh-sync'), __('Verbindung zum Ziel prüfen...', 'rh-sync')) . '</p>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- byDirection() escapt selbst.
         echo '</div>';
 
         // Preflight-State (Manifest-Daten + Bestätigung)
         echo '<div class="rhbp-sync-modal__state" data-state="preflight" hidden>';
         echo '<div class="rhbp-sync-modal__section">';
-        echo '<h3>' . esc_html__('Quelle', 'rh-sync') . '</h3>';
+        echo '<h3>' . $this->byDirection(__('Quelle', 'rh-sync'), __('Ziel', 'rh-sync')) . '</h3>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- byDirection() escapt selbst.
         echo '<div class="rhbp-sync-modal__source" data-source></div>';
         echo '</div>';
         echo '<div class="rhbp-sync-modal__section">';
-        echo '<h3>' . esc_html__('Auf der Quelle verfügbar', 'rh-sync') . '</h3>';
+        echo '<h3>' . $this->byDirection(__('Auf der Quelle verfügbar', 'rh-sync'), __('Aktuell auf dem Ziel', 'rh-sync')) . '</h3>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- byDirection() escapt selbst.
         echo '<div class="rhbp-sync-modal__stats" data-source-stats></div>';
         echo '</div>';
         echo '<div class="rhbp-sync-modal__section">';
@@ -1588,7 +1601,11 @@ final class SyncPeersPage
         echo '</div>';
         echo '<div class="rhbp-sync-modal__warn">';
         echo '<span class="dashicons dashicons-warning" aria-hidden="true"></span> ';
-        echo esc_html__('Lokale Daten in den aktivierten Bereichen werden überschrieben. Ein Sicherheits-Backup wird automatisch erstellt.', 'rh-sync');
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- byDirection() escapt selbst.
+        echo $this->byDirection(
+            __('Lokale Daten in den aktivierten Bereichen werden überschrieben. Ein Sicherheits-Backup wird automatisch erstellt.', 'rh-sync'),
+            __('Daten auf dem Ziel in den aktivierten Bereichen werden überschrieben. Dort wird vorher automatisch ein Sicherheits-Backup erstellt.', 'rh-sync')
+        );
         echo '</div>';
         echo '<div class="rhbp-sync-modal__warn rhbp-sync-modal__warn--critical" data-critical-warn hidden>';
         echo '<span class="dashicons dashicons-shield" aria-hidden="true"></span> ';
@@ -1671,7 +1688,7 @@ final class SyncPeersPage
         echo '<ul>';
         echo '<li>' . esc_html__('Mit gleichem Profil erneut versuchen', 'rh-sync') . '</li>';
         echo '<li>' . esc_html__('Profil anpassen, z.B. einzelne Bereiche deaktivieren', 'rh-sync') . '</li>';
-        echo '<li>' . esc_html__('Verbindung zur Quelle prüfen (URL, Token)', 'rh-sync') . '</li>';
+        echo '<li>' . $this->byDirection(__('Verbindung zur Quelle prüfen (URL, Token)', 'rh-sync'), __('Verbindung zum Ziel prüfen (URL, Token)', 'rh-sync')) . '</li>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- byDirection() escapt selbst.
         echo '</ul>';
         echo '</div>';
         echo '</div>';
