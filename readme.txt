@@ -4,7 +4,7 @@ Tags: sync, migration, staging, database, deployment
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.8.2
+Stable tag: 0.8.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,11 @@ You control that through the sync profile per peer: content, taxonomies, comment
 No, RH Sync runs on its own. RH Backup is the sister plugin for local backups of a single site.
 
 == Changelog ==
+
+= 0.8.3 =
+* Fix: the tick chain no longer stalls. The tick lock is released before the next tick is triggered, so pull and push run without waiting for the watchdog. Retries are reset after progress.
+* Fix: tick locks are excluded from the export and protected on the target site.
+* The sync dialog names the target instead of the source when pushing. Bundles core 2.8.0.
 
 = 0.8.2 =
 * Update checks: use a GitHub token from RH_GITHUB_TOKEN (environment variable or wp-config constant) when one is set, which lifts the API limit from 60 to 5,000 requests per hour. Without a token nothing changes.
