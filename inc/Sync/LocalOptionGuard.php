@@ -17,8 +17,9 @@ namespace RhSync\Sync;
  *
  * Geschuetzt (bleibt ziel-lokal):
  *   - Sync-Engine-Status: `rhbp_peers` (eigene Peer-Liste), `rhbp_sync_*`
- *     (Log, Jobs, Locks) + die zugehoerigen Transients. Wuerde der Import die
- *     ueberschreiben, clobbert er die laufende Sync-Operation und die Kopplung.
+ *     (Log, Jobs, Locks), `rhtick_lock_*` (Tick-Sperren) + die zugehoerigen
+ *     Transients. Wuerde der Import die ueberschreiben, clobbert er die laufende
+ *     Sync-Operation und die Kopplung.
  *   - WP-Core Site-Identitaet (siteurl/home/active_plugins/cron/...), die die
  *     Ziel-Site brechen wuerde wenn sie auf den Quellzustand gesetzt wird.
  *
@@ -48,6 +49,9 @@ final class LocalOptionGuard
         '\\_transient\\_timeout\\_rhbp\\_sync\\_%',
         '\\_site\\_transient\\_rhbp\\_sync\\_%',
         '\\_site\\_transient\\_timeout\\_rhbp\\_sync\\_%',
+        // Tick-Sperren der Ziel-Site (siehe engineOptions()). Eine Sperre aus dem
+        // Archiv gehoert zu einem Prozess der Quelle und wuerde hier nie freigegeben.
+        'rhtick\\_lock\\_%',
         // WP-Core Update-Check Transients (pro Site zeitkritisch)
         '\\_site\\_transient\\_update\\_%',
         '\\_site\\_transient\\_timeout\\_update\\_%',
@@ -113,6 +117,9 @@ final class LocalOptionGuard
             '_transient_timeout_rhbp_sync_*',
             '_site_transient_rhbp_sync_*',
             '_site_transient_timeout_rhbp_sync_*',
+            // Die Sperre des gerade laufenden Schritts (TickLock der Tick-Engine). Sie steht
+            // waehrend des Exports in der Tabelle und reiste bis zum 29.09.2026 mit ins Archiv.
+            'rhtick_lock_*',
         ];
     }
 

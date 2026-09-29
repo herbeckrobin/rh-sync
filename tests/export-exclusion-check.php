@@ -20,6 +20,7 @@ $storage = $engine->storage();
 // Es muss etwas zu finden geben, sonst beweist ein leeres Ergebnis nichts.
 update_option('rhbp_peers', [['id' => 'probe', 'url' => 'https://gegenseite.example', 'token' => 'geheim']]);
 update_option('rhbp_sync_log', [['peer_name' => 'Probe', 'direction' => 'pull']]);
+update_option('rhtick_lock_sync_tick_probe', ['owner' => 'probe', 'expires' => time() + 240], false);
 
 function dumpAus(string $zip): string
 {
@@ -67,6 +68,7 @@ $dumpTransport = dumpAus($transport);
 echo "Transportware (" . size_format((int) filesize($transport)) . "):\n";
 pruefe('Die Peer-Liste fehlt', !enthaelt($dumpTransport, 'rhbp_peers'));
 pruefe('Der Verlauf fehlt', !enthaelt($dumpTransport, 'rhbp_sync_log'));
+pruefe('Die Tick-Sperre fehlt', !enthaelt($dumpTransport, 'rhtick_lock_sync_tick_probe'));
 pruefe('Das Token taucht nirgends auf', !str_contains($dumpTransport, 'gegenseite.example'));
 pruefe('Die Inhalte sind trotzdem da', enthaelt($dumpTransport, 'blogname'));
 pruefe('Modul-Einstellungen sind da', str_contains($dumpTransport, 'rhbp_settings_'));
@@ -93,6 +95,7 @@ foreach ([$transport, $sicherung] as $datei) {
 }
 delete_option('rhbp_peers');
 delete_option('rhbp_sync_log');
+delete_option('rhtick_lock_sync_tick_probe');
 
 $fehler = pruefe('', true);
 echo "\n" . ($fehler === 0 ? "Alles wie erwartet.\n" : "{$fehler} Abweichung(en).\n");

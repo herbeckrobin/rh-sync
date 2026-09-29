@@ -243,6 +243,10 @@ namespace {
     check('Die Job-Liste bleibt zuhause', $ausgeschlossen('rhbp_sync_jobs_index'));
     check('Ein einzelner Job-Stand bleibt zuhause', $ausgeschlossen('rhbp_sync_job_1fd73d717dbaf4bf'));
     check('Die Transients der Engine bleiben zuhause', $ausgeschlossen('_transient_rhbp_sync_status_abc'));
+    // Der Vorfall vom 29.09.2026: die Sperre des laufenden Schritts stand
+    // während des Exports in der Tabelle und wanderte mit ins Archiv.
+    check('Die Tick-Sperre eines Laufs bleibt zuhause', $ausgeschlossen('rhtick_lock_sync_tick_1fd73d717dbaf4bf'));
+    check('Auch die eines anderen Moduls', $ausgeschlossen('rhtick_lock_tick_abc'));
 
     check('Modul-Einstellungen wandern weiter mit', !$ausgeschlossen('rhbp_settings_seo'));
     check('Die Einstellungen des Sync-Moduls auch', !$ausgeschlossen('rhbp_settings_sync'));
